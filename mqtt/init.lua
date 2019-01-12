@@ -81,7 +81,7 @@ local client_mt = {
 				math_randomseed(os_time())
 				random_initialized = true
 			end
-			self.id = str_format("luamqtt-v%s-%07x", str_gsub(mqtt.library_version, "%.", "-"), math_random(1, 0xFFFFFFF))
+			self.id = str_format("luamqtt%s%07x", str_gsub(mqtt.library_version, "%.", ""), math_random(1, 0xFFFFFFF))
 		end
 		self.uri = args.uri
 		assert(type(self.uri) == "string", "expecting .uri to be a string")

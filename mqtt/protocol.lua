@@ -46,6 +46,16 @@ local div = tools.div
 local unpack = unpack or table.unpack
 
 
+-- Available versions of MQTT protocol
+protocol.versions = {
+	[4] = "v3.1.1",
+	[5] = "v5.0",
+	v311 = "v3.1.1",
+	v50 = "v5.0",
+	["v3.1.1"] = "v3.1.1",
+	["v5.0"] = "v5.0",
+}
+
 -- Create uint8 value data
 function protocol.make_uint8(val)
 	if val < 0 or val > 0xFF then
@@ -62,6 +72,14 @@ local function make_uint16(val)
 	return str_char(rshift(val, 8), band(val, 0xFF))
 end
 protocol.make_uint16 = make_uint16
+
+-- Create uint32 value data
+function protocol.make_uint32(val)
+	if val < 0 or val > 0xFFFFFFFF then
+		error("value is out of range to encode as uint32: "..tostring(val))
+	end
+	return str_char(rshift(val, 24), band(rshift(val, 16), 0xFF), band(rshift(val, 8), 0xFF), band(val, 0xFF))
+end
 
 -- Create UTF-8 string data
 -- DOCv3.1.1: 1.5.3 UTF-8 encoded strings

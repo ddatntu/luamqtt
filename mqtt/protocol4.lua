@@ -11,6 +11,10 @@ MQTT v3.1.1 documentation (DOC):
 local protocol4 = {}
 
 
+-- MQTT protocol version
+protocol4.version = "v3.1.1"
+
+
 -- required modules
 local string = require("string")
 local bit = require("mqtt.bit")

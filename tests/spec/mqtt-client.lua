@@ -64,6 +64,8 @@ describe("MQTT client", function()
 				ssl = true,
 				clean = true,
 			},
+			-- TODO: test flespi & fluux for MQTTv5.0 features
+			-- TODO: test more brokers from https://github.com/mqtt/mqtt.github.io/wiki/public_brokers
 		}
 
 	for _, case in ipairs(cases) do
