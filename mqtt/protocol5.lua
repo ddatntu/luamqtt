@@ -99,6 +99,66 @@ local function make_uint8_0_or_1(value)
 	return make_uint8(value)
 end
 
+-- Read string using given read_func function
+-- Returns false plus error message on failure
+-- Returns parsed string on success
+local function parse_string(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local len, err = read_func(2)
+	if not len then
+		return false, "failed to read string length: "..err
+	end
+	-- convert len string from 2-byte integer
+	local byte1, byte2 = str_byte(len, 1, 2)
+	len = bor(lshift(byte1, 8), byte2)
+	-- and return string if parsed length
+	return read_func(len)
+end
+
+-- Parse uint8 value using given read_func
+local function parse_uint8(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local value, err = read_func(1)
+	if not value then
+		return false, "failed to read 1 byte for uint8: "..err
+	end
+	return str_byte(value, 1, 1)
+end
+
+-- Parse uint8 value with only 0 or 1 value
+local function parse_uint8_0_or_1(read_func)
+	local value, err = parse_uint8(read_func)
+	if not value then
+		return false, err
+	end
+	if value ~= 0 and value ~= 1 then
+		return false, "expecting only 0 or 1 but got: "..value
+	end
+	return value
+end
+
+-- Parse uint16 value using given read_func
+local function parse_uint16(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local value, err = read_func(2)
+	if not value then
+		return false, "failed to read 2 byte for uint16: "..err
+	end
+	local byte1, byte2 = str_byte(value, 1, 2)
+	return lshift(byte1, 8) + byte2
+end
+
+-- Parse uint32 value using given read_func
+local function parse_uint32(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local value, err = read_func(4)
+	if not value then
+		return false, "failed to read 4 byte for uint32: "..err
+	end
+	local byte1, byte2, byte3, byte4 = str_byte(value, 1, 4)
+	return lshift(byte1, 24) + lshift(byte2, 16) + lshift(byte3, 8) + byte4
+end
+
 -- Known property names and its identifiers, DOC: 2.2.2.2 Property
 local property_pairs = {
 	{ 0x01, "payload_format_indicator",
@@ -121,19 +181,19 @@ local property_pairs = {
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x11, "session_expiry_interval",
 		make = make_uint32,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint32, },
 	{ 0x12, "assigned_client_identifier",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_string, },
 	{ 0x13, "server_keep_alive",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint16, },
 	{ 0x15, "authentication_method",
 		make = make_string,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_string, },
 	{ 0x16, "authentication_data",
 		make = make_string, -- TODO: make_binary_data
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_string, },
 	{ 0x17, "request_problem_information",
 		make = make_uint8_0_or_1,
 		parse = function(read_func) error("not implemented") end, },
@@ -145,43 +205,43 @@ local property_pairs = {
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x1A, "response_information",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
-	{ 0x1C, "server_reference_",
+		parse = parse_string, },
+	{ 0x1C, "server_reference",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_string, },
 	{ 0x1F, "reason_string",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_string, },
 	{ 0x21, "receive_maximum",
 		make = make_uint16,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint16, },
 	{ 0x22, "topic_alias_maximum",
 		make = make_uint16,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint16, },
 	{ 0x23, "topic_alias",
 		make = function(value) error("not implemented") end,
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x24, "maximum_qos",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8_0_or_1, },
 	{ 0x25, "retain_available",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8, },
 	{ 0x26, "user_property",
 		make = function(value) error("not implemented") end,
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x27, "maximum_packet_size",
 		make = make_uint32,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint32, },
 	{ 0x28, "wildcard_subscription_available",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8_0_or_1, },
 	{ 0x29, "subscription_identifier_available",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8_0_or_1, },
 	{ 0x2A, "shared_subscription_available",
 		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8_0_or_1, },
 }
 
 -- properties table with keys in two directions: from name to identifier and back
@@ -211,6 +271,25 @@ local allowed_properties = {
 		[0x26] = true, -- DOC: 3.1.2.11.8 User Property
 		[0x15] = true, -- DOC: 3.1.2.11.9 Authentication Method
 		[0x16] = true, -- DOC: 3.1.2.11.10 Authentication Data
+	},
+	[packet_type.CONNACK] = {
+		[0x11] = true, -- DOC: 3.2.2.3.2 Session Expiry Interval
+		[0x21] = true, -- DOC: 3.2.2.3.3 Receive Maximum
+		[0x24] = true, -- DOC: 3.2.2.3.4 Maximum QoS
+		[0x25] = true, -- DOC: 3.2.2.3.5 Retain Available
+		[0x27] = true, -- DOC: 3.2.2.3.6 Maximum Packet Size
+		[0x12] = true, -- DOC: 3.2.2.3.7 Assigned Client Identifier
+		[0x22] = true, -- DOC: 3.2.2.3.8 Topic Alias Maximum
+		[0x1F] = true, -- DOC: 3.2.2.3.9 Reason String
+		[0x26] = true, -- DOC: 3.2.2.3.10 User Property
+		[0x28] = true, -- DOC: 3.2.2.3.11 Wildcard Subscription Available
+		[0x29] = true, -- DOC: 3.2.2.3.12 Subscription Identifiers Available
+		[0x2A] = true, -- DOC: 3.2.2.3.13 Shared Subscription Available
+		[0x13] = true, -- DOC: 3.2.2.3.14 Server Keep Alive
+		[0x1A] = true, -- DOC: 3.2.2.3.15 Response Information
+		[0x1C] = true, -- DOC: 3.2.2.3.16 Server Reference
+		[0x15] = true, -- DOC: 3.2.2.3.17 Authentication Method
+		[0x16] = true, -- DOC: 3.2.2.3.18 Authentication Data
 	},
 	-- TODO
 }
@@ -365,36 +444,58 @@ function protocol5.make_packet(args)
 	end
 end
 
--- Parse properties from given data for specified packet type
+-- Parse properties using given read_data function for specified packet type
 -- Result will be stored in packet.properties and packet.user_properties
--- Returns string with error message on failure
-local function parse_properties(ptype, data, packet)
+-- Returns false plus string with error message on failure
+-- Returns true on success
+local function parse_properties(ptype, read_data, input, packet)
+	assert(type(read_data) == "function", "expecting read_data to be a function")
 	-- DOC: 2.2.2 Properties
 	-- parse Property Length
 	-- create read_func for parse_var_length and other parse functions, reading from data string instead of network connector
-	local off = 1 -- read offset from data string
-	local read_func = function(size)
-		if off + size - 1 > #data then
-			return false, "no more data available to parse properties"
-		end
-		local res = str_sub(data, off, off + size - 1)
-		off = off + size
-		return res
-	end
-	local len = parse_var_length(read_func)
+	print("parse_properties", input[1], input.available)
+	local len = parse_var_length(read_data)
+	print("parse_properties", input[1], input.available, len)
 	-- check data contains enough bytes for reading properties
-	if #data - off - 1 < len then
-		return "not enough data to parse properties of length "..len
+	if input.available < len then
+		return true, "not enough data to parse properties of length "..len
 	end
 	-- parse allowed properties
+	local uprop_id = properties.user_property
 	local allowed = assert(allowed_properties[ptype], "no allowed properties for specified packet type: "..tostring(ptype))
-	while off <= len do
-
-		local prop_id = parse_var_length(read_func)
-		break
+	local props_end = input[1] + len
+	while input[1] < props_end do
+		-- property id, DOC: 2.2.2.2 Property
+		local prop_id, err = parse_var_length(read_data)
+		if not prop_id then
+			return false, "failed to parse property length: "..err
+		end
+		if not allowed[prop_id] then
+			return false, "property "..prop_id.." is not allowed for packet type "..ptype
+		end
+		if prop_id == uprop_id then
+			-- parse name=value string pair
+			local name, value
+			name, err = parse_string(read_data)
+			if not name then
+				return false, "failed to parse user property name: "..err
+			end
+			value, err = parse_string(read_data)
+			if not value then
+				return false, "failed to parse user property value: "..err
+			end
+			packet.user_properties[name] = value
+		else
+			-- parse property value according its identifier
+			local value
+			value, err = property_parse[prop_id](read_data)
+			if err then
+				return false, "failed ro parse property "..prop_id.." value: "..err
+			end
+			packet.properties[properties[prop_id]] = value
+		end
 	end
-
-	return "not implemented"
+	return true
 end
 
 -- Parse packet using given read_func
@@ -405,24 +506,37 @@ function protocol5.parse_packet(read_func)
 	local byte1, byte2, err, len, data, rc
 	byte1, err = read_func(1)
 	if not byte1 then
-		return false, err
+		return false, "failed to read first byte: "..err
 	end
 	byte1 = str_byte(byte1, 1, 1)
 	local ptype = rshift(byte1, 4)
 	local flags = band(byte1, 0xF)
 	len, err = parse_var_length(read_func)
 	if not len then
-		return false, err
+		return false, "failed to parse remaining length: "..err
 	end
+	local input = {1, available = 0} -- input data offset and available size
 	if len > 0 then
 		data, err = read_func(len)
 	else
 		data = ""
 	end
 	if not data then
-		return false, err
+		return false, "failed to read packet data: "..err
 	end
-	local data_len = data:len()
+	local data_len = data:len() -- TODO: remove?
+	input.available = data_len
+	-- read data function
+	local function read_data(size)
+		if size > input.available then
+			return false, "not enough data to read size: "..size
+		end
+		local off = input[1]
+		local res = str_sub(data, off, off + size - 1)
+		input[1] = off + size
+		input.available = input.available - size
+		return res
+	end
 	-- parse readed data according type in fixed header
 	if ptype == packet_type.CONNACK then
 		-- DOC: 3.2 CONNACK – Connect acknowledgement
@@ -431,13 +545,17 @@ function protocol5.parse_packet(read_func)
 		end
 		-- DOC: 3.2.2.1.1 Session Present
 		-- DOC: 3.2.2.2 Connect Reason Code
-		byte1, byte2 = str_byte(data, 1, 2)
+		byte1, byte2 = parse_uint8(read_data), parse_uint8(read_data)
 		local sp = (band(byte1, 0x1) ~= 0)
 		local packet = setmetatable({type=ptype, sp=sp, rc=byte2, properties={}, user_properties={}}, packet_mt)
 		-- DOC: 3.2.2.3 CONNACK Properties
-		err = parse_properties(ptype, data, packet)
-		if err then
-			return false, err
+		local ok
+		ok, err = parse_properties(ptype, read_data, input, packet)
+		if not ok then
+			return false, "failed to parse packet properties: "..err
+		end
+		if input.available > 0 then
+			return false, "extra data in remaining length left after packet parsing"
 		end
 		return packet
 	elseif ptype == packet_type.PUBLISH then
@@ -534,16 +652,6 @@ function protocol5.parse_packet(read_func)
 	else
 		return false, "unexpected packet type received: "..tostring(ptype)
 	end
-end
-
--- Parse packet using given read_func
--- Returns packet on success or false and error message on failure
-function protocol5.parse_packet(read_func)
-	assert(type(read_func) == "function", "expecting read_func to be a function")
-
-	-- TODO: 2.1.3 Flags
-
-	error("not implemented")
 end
 
 -- export module table

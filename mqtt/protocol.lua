@@ -267,13 +267,23 @@ function protocol.parse_var_length(read_func)
 	return val
 end
 
+-- Convert table to string in human-readable form
+local function table_to_string(tbl)
+	local res = {}
+	for k, v in pairs(tbl) do
+		if type(v) == "table" then
+			v = table_to_string(v)
+		else
+			v = tostring(v)
+		end
+		res[#res + 1] = str_format("%s=%s", tostring(k), v)
+	end
+	return str_format("{%s}", tbl_concat(res, ", "))
+end
+
 -- Convert packet to string representation
 local function packet_tostring(packet)
-	local res = {}
-	for k, v in pairs(packet) do
-		res[#res + 1] = str_format("%s=%s", k, tostring(v))
-	end
-	return str_format("%s{%s}", tostring(packet_type[packet.type]), tbl_concat(res, ", "))
+	return str_format("%s%s", tostring(packet_type[packet.type]), table_to_string(packet))
 end
 protocol.packet_tostring = packet_tostring
 
