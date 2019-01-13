@@ -16,6 +16,7 @@ protocol5.version = "v5.0"
 
 
 -- required modules
+local table = require("table")
 local string = require("string")
 local bit = require("mqtt.bit")
 local protocol = require("mqtt.protocol")
@@ -25,6 +26,7 @@ local assert = assert
 local tostring = tostring
 local setmetatable = setmetatable
 local error = error
+local tbl_sort = table.sort
 local str_sub = string.sub
 local str_byte = string.byte
 local str_char = string.char
@@ -221,16 +223,24 @@ local function make_properties(ptype, args)
 	-- writing known properties
 	if args.properties ~= nil then
 		assert(type(args.properties) == "table", "expecting .properties to be a table")
+		-- validate all properties and append them to order list
+		local order = {}
 		for name, value in pairs(args.properties) do
 			assert(type(name) == "string", "expecting property name to be a string: "..tostring(name))
 			-- detect property identifier and check it's allowed for that packet type
 			local prop_id = assert(properties[name], "unknown property: "..tostring(name))
 			assert(prop_id ~= uprop_id, "user properties should be passed in .user_properties table")
 			assert(allowed[prop_id], "property "..name.." is not allowed for packet type "..ptype)
+			order[#order + 1] = { prop_id, name, value }
+		end
+		-- sort props in the identifier ascending order
+		tbl_sort(order, function(a, b) return a[1] < b[1] end)
+		for _, item in ipairs(order) do
+			local prop_id, name,  value = unpack(item)
 			-- make property data
 			local ok, val = pcall(property_make[prop_id], value)
 			if not ok then
-				error("invalid property value: "..name.." = "..tostring(value))
+				error("invalid property value: "..name.." = "..tostring(value)..": "..tostring(val))
 			end
 			local prop = combine(
 				str_char(make_var_length(prop_id)),
@@ -323,7 +333,6 @@ local function make_packet_connect(args)
 	return combine(header, variable_header, payload)
 end
 
-
 -- Create packet of given {type: number} in args
 function protocol5.make_packet(args)
 	assert(type(args) == "table", "expecting args to be a table")
@@ -353,6 +362,177 @@ function protocol5.make_packet(args)
 		return combine("\224\000") -- 224 == 0xD0, type == 14, flags == 0
 	else
 		error("unexpected packet type to make: "..ptype)
+	end
+end
+
+-- Parse properties from given data for specified packet type
+-- Result will be stored in packet.properties and packet.user_properties
+-- Returns string with error message on failure
+local function parse_properties(ptype, data, packet)
+	-- DOC: 2.2.2 Properties
+	-- parse Property Length
+	-- create read_func for parse_var_length and other parse functions, reading from data string instead of network connector
+	local off = 1 -- read offset from data string
+	local read_func = function(size)
+		if off + size - 1 > #data then
+			return false, "no more data available to parse properties"
+		end
+		local res = str_sub(data, off, off + size - 1)
+		off = off + size
+		return res
+	end
+	local len = parse_var_length(read_func)
+	-- check data contains enough bytes for reading properties
+	if #data - off - 1 < len then
+		return "not enough data to parse properties of length "..len
+	end
+	-- parse allowed properties
+	local allowed = assert(allowed_properties[ptype], "no allowed properties for specified packet type: "..tostring(ptype))
+	while off <= len do
+
+		local prop_id = parse_var_length(read_func)
+		break
+	end
+
+	return "not implemented"
+end
+
+-- Parse packet using given read_func
+-- Returns packet on success or false and error message on failure
+function protocol5.parse_packet(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	-- parse fixed header
+	local byte1, byte2, err, len, data, rc
+	byte1, err = read_func(1)
+	if not byte1 then
+		return false, err
+	end
+	byte1 = str_byte(byte1, 1, 1)
+	local ptype = rshift(byte1, 4)
+	local flags = band(byte1, 0xF)
+	len, err = parse_var_length(read_func)
+	if not len then
+		return false, err
+	end
+	if len > 0 then
+		data, err = read_func(len)
+	else
+		data = ""
+	end
+	if not data then
+		return false, err
+	end
+	local data_len = data:len()
+	-- parse readed data according type in fixed header
+	if ptype == packet_type.CONNACK then
+		-- DOC: 3.2 CONNACK – Connect acknowledgement
+		if data_len < 3 then
+			return false, "expecting data of length 3 bytes or more"
+		end
+		-- DOC: 3.2.2.1.1 Session Present
+		-- DOC: 3.2.2.2 Connect Reason Code
+		byte1, byte2 = str_byte(data, 1, 2)
+		local sp = (band(byte1, 0x1) ~= 0)
+		local packet = setmetatable({type=ptype, sp=sp, rc=byte2, properties={}, user_properties={}}, packet_mt)
+		-- DOC: 3.2.2.3 CONNACK Properties
+		err = parse_properties(ptype, data, packet)
+		if err then
+			return false, err
+		end
+		return packet
+	elseif ptype == packet_type.PUBLISH then
+		-- DOC: 3.3 PUBLISH – Publish message
+		-- DOC: 3.3.1.1 DUP
+		local dup = (band(flags, 0x8) ~= 0)
+		-- DOC: 3.3.1.2 QoS
+		local qos = band(rshift(flags, 1), 0x3)
+		-- DOC: 3.3.1.3 RETAIN
+		local retain = (band(flags, 0x1) ~= 0)
+		-- DOC: 3.3.2.1 Topic Name
+		if data_len < 2 then
+			return false, "expecting data of length at least 2 bytes"
+		end
+		byte1, byte2 = str_byte(data, 1, 2)
+		local topic_len = bor(lshift(byte1, 8), byte2)
+		if data_len < 2 + topic_len then
+			return false, "malformed PUBLISH packet: not enough data to parse topic"
+		end
+		local topic = str_sub(data, 3, 3 + topic_len - 1)
+		-- DOC: 3.3.2.2 Packet Identifier
+		local packet_id, packet_id_len = nil, 0
+		if qos > 0 then
+			-- DOC: 3.3.2.2 Packet Identifier
+			if data_len < 2 + topic_len + 2 then
+				return false, "malformed PUBLISH packet: not enough data to parse packet_id"
+			end
+			byte1, byte2 = str_byte(data, 3 + topic_len, 3 + topic_len + 1)
+			packet_id = bor(lshift(byte1, 8), byte2)
+			packet_id_len = 2
+		end
+		-- DOC: 3.3.3 Payload
+		local payload
+		if data_len > 2 + topic_len + packet_id_len then
+			payload = str_sub(data, 2 + topic_len + packet_id_len + 1)
+		end
+		return setmetatable({type=ptype, dup=dup, qos=qos, retain=retain, packet_id=packet_id, topic=topic, payload=payload}, packet_mt)
+	elseif ptype == packet_type.PUBACK then
+		-- DOC: 3.4 PUBACK – Publish acknowledgement
+		if data_len ~= 2 then
+			return false, "expecting data of length 2 bytes"
+		end
+		-- DOC: 3.4.2 Variable header
+		byte1, byte2 = str_byte(data, 1, 2)
+		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+	elseif ptype == packet_type.PUBREC then
+		-- DOC: 3.5 PUBREC – Publish received (QoS 2 publish received, part 1)
+		if data_len ~= 2 then
+			return false, "expecting data of length 2 bytes"
+		end
+		-- DOC: 3.5.2 Variable header
+		byte1, byte2 = str_byte(data, 1, 2)
+		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+	elseif ptype == packet_type.PUBREL then
+		-- DOC: 3.6 PUBREL – Publish release (QoS 2 publish received, part 2)
+		if data_len ~= 2 then
+			return false, "expecting data of length 2 bytes"
+		end
+		-- also flags should be checked to equals 2 by the server
+		-- DOC: 3.6.2 Variable header
+		byte1, byte2 = str_byte(data, 1, 2)
+		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+	elseif ptype == packet_type.PUBCOMP then
+		-- 3.7 PUBCOMP – Publish complete (QoS 2 publish received, part 3)
+		if data_len ~= 2 then
+			return false, "expecting data of length 2 bytes"
+		end
+		-- DOC: 3.7.2 Variable header
+		byte1, byte2 = str_byte(data, 1, 2)
+		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+	elseif ptype == packet_type.SUBACK then
+		-- DOC: 3.9 SUBACK – Subscribe acknowledgement
+		if data_len ~= 3 then
+			return false, "expecting data of length 3 bytes"
+		end
+		-- DOC: 3.9.2 Variable header
+		-- DOC: 3.9.3 Payload
+		byte1, byte2, rc = str_byte(data, 1, 3)
+		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2), rc=rc, failure=(rc == 0x80)}, packet_mt)
+	elseif ptype == packet_type.UNSUBACK then
+		-- DOC: 3.11 UNSUBACK – Unsubscribe acknowledgement
+		if data_len ~= 2 then
+			return false, "expecting data of length 2 bytes"
+		end
+		-- DOC: 3.11.2 Variable header
+		byte1, byte2 = str_byte(data, 1, 2)
+		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+	elseif ptype == packet_type.PINGRESP then
+		-- DOC: 3.13 PINGRESP – PING response
+		if data_len ~= 0 then
+			return false, "expecting data of length 0 bytes"
+		end
+		return setmetatable({type=ptype}, packet_mt)
+	else
+		return false, "unexpected packet type received: "..tostring(ptype)
 	end
 end
 
