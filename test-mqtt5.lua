@@ -23,7 +23,10 @@ local connect = protocol5.make_packet{
 	type = protocol.packet_type.CONNECT,
 	id = "abcde",
 	username = "stPwSVV73Eqw5LSv0iMXbc4EguS7JyuZR9lxU5uLxI5tiNM8ToTVqNpu85pFtJv9",
-	clean = true,
+	clean = false,
+	properties = {
+		session_expiry_interval = 10,
+	},
 }
 
 local data = tostring(connect)
@@ -31,9 +34,12 @@ print("send:", data:len(), tools.hex(data))
 conn:send(data)
 
 local packet = protocol5.parse_packet(function(size)
-	local data = conn:receive(size)
-	print("read_func", size, tools.hex(data))
-	return data
+	local part, err = conn:receive(size)
+	if not part then
+		return false, err
+	end
+	print("read_func", size, tools.hex(part))
+	return part
 end)
 
 print(packet)

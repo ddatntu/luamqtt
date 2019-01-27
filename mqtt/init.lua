@@ -463,7 +463,7 @@ local client_mt = {
 		while i < len do
 			i, err = self.connector.send(self.connection, data, i)
 			if not i then
-				err = "connector.send failed: "..err
+				err = "connector.send failed: "..tostring(err)
 				return false, err
 			end
 		end

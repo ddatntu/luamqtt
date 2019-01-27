@@ -99,6 +99,22 @@ local function make_uint8_0_or_1(value)
 	return make_uint8(value)
 end
 
+-- Make data for 2-byte property with nonzero value check
+local function make_uint16_nonzero(value)
+	if value == 0 then
+		error("expecting nonzero value")
+	end
+	return make_uint16(value)
+end
+
+-- Make data for variable length property with nonzero value check
+local function make_var_length_nonzero(value)
+	if value == 0 then
+		error("expecting nonzero value")
+	end
+	return str_char(make_var_length(value))
+end
+
 -- Read string using given read_func function
 -- Returns false plus error message on failure
 -- Returns parsed string on success
@@ -160,7 +176,7 @@ local function parse_uint32(read_func)
 end
 
 -- Known property names and its identifiers, DOC: 2.2.2.2 Property
-local property_pairs = {
+local property_pairs = { -- TODO
 	{ 0x01, "payload_format_indicator",
 		make = make_uint8_0_or_1,
 		parse = function(read_func) error("not implemented") end, },
@@ -177,8 +193,9 @@ local property_pairs = {
 		make = make_string, -- TODO: make_binary_data
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x0B, "subscription_identifier",
-		make = function(value) error("not implemented") end,
-		parse = function(read_func) error("not implemented") end, },
+		make = make_var_length_nonzero,
+		parse = function(read_func) error("not implemented") end,
+		multiple = true, },
 	{ 0x11, "session_expiry_interval",
 		make = make_uint32,
 		parse = parse_uint32, },
@@ -210,7 +227,7 @@ local property_pairs = {
 		make = function(value) error("not implemented") end,
 		parse = parse_string, },
 	{ 0x1F, "reason_string",
-		make = function(value) error("not implemented") end,
+		make = make_string,
 		parse = parse_string, },
 	{ 0x21, "receive_maximum",
 		make = make_uint16,
@@ -219,7 +236,7 @@ local property_pairs = {
 		make = make_uint16,
 		parse = parse_uint16, },
 	{ 0x23, "topic_alias",
-		make = function(value) error("not implemented") end,
+		make = make_uint16_nonzero,
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x24, "maximum_qos",
 		make = function(value) error("not implemented") end,
@@ -227,7 +244,7 @@ local property_pairs = {
 	{ 0x25, "retain_available",
 		make = function(value) error("not implemented") end,
 		parse = parse_uint8, },
-	{ 0x26, "user_property",
+	{ 0x26, "user_property", -- not implemented intentionally
 		make = function(value) error("not implemented") end,
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x27, "maximum_packet_size",
@@ -250,12 +267,15 @@ local properties = {}
 local property_make = {}
 -- table with property value parse function
 local property_parse = {}
+-- table with property multiple flag
+local property_multiple = {}
 -- fill the properties and property_make tables
 for _, prop in ipairs(property_pairs) do
-	properties[prop[2]] = prop[1]			-- name ==> identifier
-	properties[prop[1]] = prop[2]			-- identifier ==> name
-	property_make[prop[1]] = prop.make		-- identifier ==> make function
-	property_parse[prop[1]] = prop.parse	-- identifier ==> make function
+	properties[prop[2]] = prop[1]				-- name ==> identifier
+	properties[prop[1]] = prop[2]				-- identifier ==> name
+	property_make[prop[1]] = prop.make			-- identifier ==> make function
+	property_parse[prop[1]] = prop.parse		-- identifier ==> make function
+	property_multiple[prop[1]] = prop.multiple	-- identifier ==> multiple flag
 end
 
 -- Allowed properties per packet type
@@ -290,6 +310,32 @@ local allowed_properties = {
 		[0x1C] = true, -- DOC: 3.2.2.3.16 Server Reference
 		[0x15] = true, -- DOC: 3.2.2.3.17 Authentication Method
 		[0x16] = true, -- DOC: 3.2.2.3.18 Authentication Data
+	},
+	[packet_type.PUBLISH] = {
+		[0x01] = true, -- DOC: 3.3.2.3.2 Payload Format Indicator
+		[0x02] = true, -- DOC: 3.3.2.3.3 Message Expiry Interval
+		[0x23] = true, -- DOC: 3.3.2.3.4 Topic Alias
+		[0x08] = true, -- DOC: 3.3.2.3.5 Response Topic
+		[0x09] = true, -- DOC: 3.3.2.3.6 Correlation Data
+		[0x26] = true, -- DOC: 3.3.2.3.7 User Property
+		[0x0B] = true, -- DOC: 3.3.2.3.8 Subscription Identifier
+		[0x03] = true, -- DOC: 3.3.2.3.9 Content Type
+	},
+	[packet_type.PUBACK] = {
+		[0x1F] = true, -- DOC: 3.4.2.2.2 Reason String
+		[0x26] = true, -- DOC: 3.4.2.2.3 User Property
+	},
+	[packet_type.PUBREC] = {
+		[0x1F] = true, -- DOC: 3.5.2.2.2 Reason String
+		[0x26] = true, -- DOC: 3.5.2.2.3 User Property
+	},
+	[packet_type.PUBREL] = {
+		[0x1F] = true, -- DOC: 3.6.2.2.2 Reason String
+		[0x26] = true, -- DOC: 3.6.2.2.3 User Property
+	},
+	[packet_type.PUBCOMP] = {
+		[0x1F] = true, -- DOC: 3.7.2.2.2 Reason String
+		[0x26] = true, -- DOC: 3.7.2.2.3 User Property
 	},
 	-- TODO
 }
@@ -412,6 +458,130 @@ local function make_packet_connect(args)
 	return combine(header, variable_header, payload)
 end
 
+-- Create PUBLISH packet, DOC: 3.3 PUBLISH – Publish message
+local function make_packet_publish(args)
+	-- check args
+	assert(type(args.topic) == "string", "expecting .topic to be a string")
+	if args.payload ~= nil then
+		assert(type(args.payload) == "string", "expecting .payload to be a string")
+	end
+	assert(type(args.qos) == "number", "expecting .qos to be a number")
+	assert(check_qos(args.qos), "expecting .qos to be a valid QoS value")
+	assert(type(args.retain) == "boolean", "expecting .retain to be a boolean")
+	assert(type(args.dup) == "boolean", "expecting .dup to be a boolean")
+
+	-- DOC: 3.3.1 PUBLISH Fixed Header
+	local flags = 0
+	-- 3.3.1.3 RETAIN
+	if args.retain then
+		flags = bor(flags, 0x1)
+	end
+	-- DOC: 3.3.1.2 QoS
+	flags = bor(flags, lshift(args.qos, 1))
+	-- DOC: 3.3.1.1 DUP
+	if args.dup then
+		flags = bor(flags, lshift(1, 3))
+	end
+	-- DOC: 3.3.2 PUBLISH Variable Header
+	local variable_header = combine(
+		make_string(args.topic)
+	)
+	-- DOC: 3.3.2.2 Packet Identifier
+	if args.qos > 0 then
+		assert(type(args.packet_id) == "number", "expecting .packet_id to be a number")
+		assert(check_packet_id(args.packet_id), "expecting .packet_id to be a valid Packet Identifier")
+		variable_header:append(make_uint16(args.packet_id))
+	end
+	-- DOC: 3.3.2.3 PUBLISH Properties
+	variable_header:append(make_properties(packet_type.PUBLISH, args))
+	-- DOC: 3.3.3 PUBLISH Payload
+	local payload
+	if args.payload then
+		payload = args.payload
+	else
+		payload = ""
+	end
+	-- DOC: 3.3.1 Fixed header
+	local header = make_header(packet_type.PUBLISH, flags, variable_header:len() + payload:len())
+	return combine(header, variable_header, payload)
+end
+
+-- Create PUBACK packet, DOC: 3.4 PUBACK – Publish acknowledgement
+local function make_packet_puback(args)
+	-- check args
+	assert(type(args.packet_id) == "number", "expecting .packet_id to be a number")
+	assert(check_packet_id(args.packet_id), "expecting .packet_id to be a valid Packet Identifier")
+	assert(type(args.reason_code) == "number", "expecting .reason_code to be a number")
+	-- DOC: 3.4.2 PUBACK Variable Header
+	local variable_header = combine(make_uint16(args.packet_id))
+	local props = make_properties(packet_type.PUBACK, args)		-- DOC: 3.4.2.2 PUBACK Properties
+	-- DOC: The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success) and there are no Properties. In this case the PUBACK has a Remaining Length of 2.
+	if props:len() > 1 or args.reason_code ~= 0 then
+		variable_header:append(make_uint8(args.reason_code))	-- DOC: 3.4.2.1 PUBACK Reason Code
+		variable_header:append(props)							-- DOC: 3.4.2.2 PUBACK Properties
+	end
+	-- DOC: 3.4.1 PUBACK Fixed Header
+	local header = make_header(packet_type.PUBACK, 0, variable_header:len())
+	return combine(header, variable_header)
+end
+
+-- Create PUBREC packet, DOC: 3.5 PUBREC – Publish received (QoS 2 delivery part 1)
+local function make_packet_pubrec(args)
+	-- check args
+	assert(type(args.packet_id) == "number", "expecting .packet_id to be a number")
+	assert(check_packet_id(args.packet_id), "expecting .packet_id to be a valid Packet Identifier")
+	assert(type(args.reason_code) == "number", "expecting .reason_code to be a number")
+	-- DOC: 3.5.2 PUBREC Variable Header
+	local variable_header = combine(make_uint16(args.packet_id))
+	local props = make_properties(packet_type.PUBREC, args)		-- DOC: 3.5.2.2 PUBREC Properties
+	-- DOC: The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success) and there are no Properties. In this case the PUBREC has a Remaining Length of 2.
+	if props:len() > 1 or args.reason_code ~= 0 then
+		variable_header:append(make_uint8(args.reason_code))	-- DOC: 3.5.2.1 PUBREC Reason Code
+		variable_header:append(props)							-- DOC: 3.5.2.2 PUBREC Properties
+	end
+	-- DOC: 3.5.1 PUBREC Fixed Header
+	local header = make_header(packet_type.PUBREC, 0, variable_header:len())
+	return combine(header, variable_header)
+end
+
+-- Create PUBREL packet, DOC: 3.6 PUBREL – Publish release (QoS 2 delivery part 2)
+local function make_packet_pubrel(args)
+	-- check args
+	assert(type(args.packet_id) == "number", "expecting .packet_id to be a number")
+	assert(check_packet_id(args.packet_id), "expecting .packet_id to be a valid Packet Identifier")
+	assert(type(args.reason_code) == "number", "expecting .reason_code to be a number")
+	-- DOC: 3.6.2 PUBREL Variable Header
+	local variable_header = combine(make_uint16(args.packet_id))
+	local props = make_properties(packet_type.PUBREL, args)		-- DOC: 3.6.2.2 PUBREL Properties
+	-- DOC: The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success) and there are no Properties. In this case the PUBREL has a Remaining Length of 2.
+	if props:len() > 1 or args.reason_code ~= 0 then
+		variable_header:append(make_uint8(args.reason_code))	-- DOC: 3.6.2.1 PUBREL Reason Code
+		variable_header:append(props)							-- DOC: 3.6.2.2 PUBREL Properties
+	end
+	-- DOC: 3.6.1 PUBREL Fixed Header
+	local header = make_header(packet_type.PUBREL, 2, variable_header:len()) -- flags: fixed 0010 bits, DOC: Figure 3‑14 – PUBREL packet Fixed Header
+	return combine(header, variable_header)
+end
+
+-- Create PUBCOMP packet, DOC: 3.7 PUBCOMP – Publish complete (QoS 2 delivery part 3)
+local function make_packet_pubcomp(args)
+	-- check args
+	assert(type(args.packet_id) == "number", "expecting .packet_id to be a number")
+	assert(check_packet_id(args.packet_id), "expecting .packet_id to be a valid Packet Identifier")
+	assert(type(args.reason_code) == "number", "expecting .reason_code to be a number")
+	-- DOC: 3.7.2 PUBCOMP Variable Header
+	local variable_header = combine(make_uint16(args.packet_id))
+	local props = make_properties(packet_type.PUBCOMP, args)	-- DOC: 3.7.2.2 PUBCOMP Properties
+	-- DOC: The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success) and there are no Properties. In this case the PUBCOMP has a Remaining Length of 2.
+	if props:len() > 1 or args.reason_code ~= 0 then
+		variable_header:append(make_uint8(args.reason_code))	-- DOC: 3.7.2.1 PUBCOMP Reason Code
+		variable_header:append(props)							-- DOC: 3.7.2.2 PUBCOMP Properties
+	end
+	-- DOC: 3.7.1 PUBCOMP Fixed Header
+	local header = make_header(packet_type.PUBREL, 0, variable_header:len())
+	return combine(header, variable_header)
+end
+
 -- Create packet of given {type: number} in args
 function protocol5.make_packet(args)
 	assert(type(args) == "table", "expecting args to be a table")
@@ -453,9 +623,7 @@ local function parse_properties(ptype, read_data, input, packet)
 	-- DOC: 2.2.2 Properties
 	-- parse Property Length
 	-- create read_func for parse_var_length and other parse functions, reading from data string instead of network connector
-	print("parse_properties", input[1], input.available)
 	local len = parse_var_length(read_data)
-	print("parse_properties", input[1], input.available, len)
 	-- check data contains enough bytes for reading properties
 	if input.available < len then
 		return true, "not enough data to parse properties of length "..len
@@ -492,7 +660,13 @@ local function parse_properties(ptype, read_data, input, packet)
 			if err then
 				return false, "failed ro parse property "..prop_id.." value: "..err
 			end
-			packet.properties[properties[prop_id]] = value
+			if property_multiple[prop_id] then
+				local curr = packet.properties[properties[prop_id]] or {}
+				curr[#curr + 1] = value
+				packet.properties[properties[prop_id]] = curr
+			else
+				packet.properties[properties[prop_id]] = value
+			end
 		end
 	end
 	return true
