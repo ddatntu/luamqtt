@@ -48,6 +48,11 @@ local packet_type = protocol.packet_type
 local packet_mt = protocol.packet_mt
 
 
+-- Returns true if given value is a valid Retain Handling option, DOC: 3.8.3.1 Subscription Options
+local function check_retain_handling(val)
+	return (val == 0) or (val == 1) or (val == 2)
+end
+
 -- Create Connect Flags data, DOC: 3.1.2.3 Connect Flags
 local function make_connect_flags(args)
 	local byte = 0 -- bit 0 should be zero
@@ -224,7 +229,7 @@ local property_pairs = { -- TODO
 		make = function(value) error("not implemented") end,
 		parse = parse_string, },
 	{ 0x1C, "server_reference",
-		make = function(value) error("not implemented") end,
+		make = make_string,
 		parse = parse_string, },
 	{ 0x1F, "reason_string",
 		make = make_string,
@@ -244,7 +249,7 @@ local property_pairs = { -- TODO
 	{ 0x25, "retain_available",
 		make = function(value) error("not implemented") end,
 		parse = parse_uint8, },
-	{ 0x26, "user_property", -- not implemented intentionally
+	{ 0x26, "user_property", -- NOTE: not implemented intentionally
 		make = function(value) error("not implemented") end,
 		parse = function(read_func) error("not implemented") end, },
 	{ 0x27, "maximum_packet_size",
@@ -337,7 +342,34 @@ local allowed_properties = {
 		[0x1F] = true, -- DOC: 3.7.2.2.2 Reason String
 		[0x26] = true, -- DOC: 3.7.2.2.3 User Property
 	},
-	-- TODO
+	[packet_type.SUBSCRIBE] = {
+		[0x0B] = true, -- DOC: 3.8.2.1.2 Subscription Identifier
+		[0x26] = true, -- DOC: 3.8.2.1.3 User Property
+	},
+	[packet_type.SUBACK] = {
+		[0x1F] = true, -- DOC: 3.9.2.1.2 Reason String
+		[0x26] = true, -- DOC: 3.9.2.1.3 User Property
+	},
+	[packet_type.UNSUBSCRIBE] = {
+		[0x26] = true, -- DOC: 3.10.2.1.2 User Property
+	},
+	[packet_type.UNSUBACK] = {
+		[0x1F] = true, -- DOC: 3.11.2.1.2 Reason String
+		[0x26] = true, -- DOC: 3.11.2.1.3 User Property
+	},
+	-- NOTE: PINGREQ (3.12), PINGRESP (3.13) has no properties
+	[packet_type.DISCONNECT] = {
+		[0x11] = true, -- DOC: 3.14.2.2.2 Session Expiry Interval
+		[0x1F] = true, -- DOC: 3.14.2.2.3 Reason String
+		[0x26] = true, -- DOC: 3.14.2.2.4 User Property
+		[0x1C] = true, -- DOC: 3.14.2.2.5 Server Reference
+	},
+	[packet_type.AUTH] = {
+		[0x15] = true, -- DOC: 3.15.2.2.2 Authentication Method
+		[0x16] = true, -- DOC: 3.15.2.2.3 Authentication Data
+		[0x1F] = true, -- DOC: 3.15.2.2.4 Reason String
+		[0x26] = true, -- DOC: 3.15.2.2.5 User Property
+	},
 }
 
 -- Create properties field for various control packets, DOC: 2.2.2 Properties
@@ -578,7 +610,106 @@ local function make_packet_pubcomp(args)
 		variable_header:append(props)							-- DOC: 3.7.2.2 PUBCOMP Properties
 	end
 	-- DOC: 3.7.1 PUBCOMP Fixed Header
-	local header = make_header(packet_type.PUBREL, 0, variable_header:len())
+	local header = make_header(packet_type.PUBCOMP, 0, variable_header:len())
+	return combine(header, variable_header)
+end
+
+-- Create SUBSCRIBE packet, DOC: 3.8 SUBSCRIBE - Subscribe request
+local function make_packet_subscribe(args)
+	-- check args
+	assert(type(args.packet_id) == "number", "expecting .packet_id to be a number")
+	assert(check_packet_id(args.packet_id), "expecting .packet_id to be a valid Packet Identifier")
+	assert(type(args.subscriptions) == "table", "expecting .subscriptions to be a table")
+	assert(#args.subscriptions > 0, "expecting .subscriptions to be a non-empty array")
+	-- DOC: 3.8.2 SUBSCRIBE Variable Header
+	local variable_header = combine(
+		make_uint16(args.packet_id),
+		make_properties(packet_type.SUBSCRIBE, args)	-- DOC: 3.8.2.1 SUBSCRIBE Properties
+	)
+	-- DOC: 3.8.3 SUBSCRIBE Payload
+	local payload = combine()
+	for i, subscription in ipairs(args.subscriptions) do
+		assert(type(subscription) == "table", "expecting .subscriptions["..i.."] to be a table")
+		assert(type(subscription.topic) == "string", "expecting .subscriptions["..i.."].topic to be a string")
+		if subscription.qos ~= nil then -- TODO: maybe remove that check and make .qos mandatory?
+			assert(type(subscription.qos) == "number", "expecting .subscriptions["..i.."].qos to be a number")
+			assert(check_qos(subscription.qos), "expecting .subscriptions["..i.."].qos to be a valid QoS value")
+		end
+		assert(type(subscription.no_local) == "boolean", "expecting .subscriptions["..i.."].no_local to be a boolean")
+		assert(type(subscription.retain_as_published) == "boolean", "expecting .subscriptions["..i.."].retain_as_published to be a boolean")
+		assert(type(subscription.retain_handling) == "number", "expecting .subscriptions["..i.."].retain_handling to be a number")
+		assert(check_retain_handling(subscription.retain_handling), "expecting .subscriptions["..i.."].retain_handling to be a valid Retain Handling option")
+		-- DOC: 3.8.3.1 Subscription Options
+		local so = subscription.qos or 0
+		if subscription.no_local then
+			so = bor(so, 4) -- set Bit 2
+		end
+		if subscription.retain_as_published then
+			so = bor(so, 8) -- set Bit 3
+		end
+		so = bor(so, lshift(subscription.retain_handling, 4)) -- set Bit 4 and 5
+		payload:append(make_string(subscription.topic))
+		payload:append(make_uint8(so))
+	end
+	-- DOC: 3.8.1 SUBSCRIBE Fixed Header
+	local header = make_header(packet_type.SUBSCRIBE, 2, variable_header:len() + payload:len()) -- flags: fixed 0010 bits, DOC: Figure 3‑18 SUBSCRIBE packet Fixed Header
+	return combine(header, variable_header, payload)
+end
+
+-- Create UNSUBSCRIBE packet, DOC: 3.10 UNSUBSCRIBE – Unsubscribe request
+local function make_packet_unsubscribe(args)
+	-- check args
+	assert(type(args.packet_id) == "number", "expecting .packet_id to be a number")
+	assert(check_packet_id(args.packet_id), "expecting .packet_id to be a valid Packet Identifier")
+	assert(type(args.subscriptions) == "table", "expecting .subscriptions to be a table")
+	assert(#args.subscriptions > 0, "expecting .subscriptions to be a non-empty array")
+	-- DOC: 3.10.2 UNSUBSCRIBE Variable Header
+	local variable_header = combine(
+		make_uint16(args.packet_id),
+		make_properties(packet_type.UNSUBSCRIBE, args)	-- DOC: 3.10.2.1 UNSUBSCRIBE Properties
+	)
+	-- DOC: 3.10.3 UNSUBSCRIBE Payload
+	local payload = combine()
+	for i, subscription in ipairs(args.subscriptions) do
+		assert(type(subscription) == "string", "expecting .subscriptions["..i.."] to be a string")
+		payload:append(make_string(subscription))
+	end
+	-- DOC: 3.10.1 UNSUBSCRIBE Fixed Header
+	local header = make_header(packet_type.UNSUBSCRIBE, 2, variable_header:len() + payload:len()) -- flags: fixed 0010 bits, DOC: Figure 3.28 – UNSUBSCRIBE packet Fixed Header
+	return combine(header, variable_header, payload)
+end
+
+-- Create DISCONNECT packet, DOC: 3.14 DISCONNECT – Disconnect notification
+local function make_packet_disconnect(args)
+	-- check args
+	assert(type(args.reason_code) == "number", "expecting .reason_code to be a number")
+	-- DOC: 3.14.2 DISCONNECT Variable Header
+	local variable_header = combine()
+	local props = make_properties(packet_type.DISCONNECT, args)	-- DOC: 3.14.2.2 DISCONNECT Properties
+	-- DOC: The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Normal disconnecton) and there are no Properties. In this case the DISCONNECT has a Remaining Length of 0.
+	if props:len() > 1 or args.reason_code ~= 0 then
+		variable_header:append(make_uint8(args.reason_code))	-- DOC: 3.14.2.1 Disconnect Reason Code
+		variable_header:append(props)							-- DOC: 3.14.2.2 DISCONNECT Properties
+	end
+	-- DOC: 3.14.1 DISCONNECT Fixed Header
+	local header = make_header(packet_type.DISCONNECT, 2, variable_header:len()) -- flags: fixed 0010 bits, DOC: Figure 3.28 – UNSUBSCRIBE packet Fixed Header
+	return combine(header, variable_header)
+end
+
+-- Create AUTH packet, DOC: 3.15 AUTH – Authentication exchange
+local function make_packet_auth(args)
+	-- check args
+	assert(type(args.reason_code) == "number", "expecting .reason_code to be a number")
+	-- DOC: 3.15.2 AUTH Variable Header
+	local variable_header = combine()
+	-- DOC: The Reason Code and Property Length can be omitted if the Reason Code is 0x00 (Success) and there are no Properties. In this case the AUTH has a Remaining Length of 0.
+	local props = make_properties(packet_type.AUTH, args)		-- DOC: 3.15.2.2 AUTH Properties
+	if props:len() > 1 or args.reason_code ~= 0 then
+		variable_header:append(make_uint8(args.reason_code))	-- DOC: 3.15.2.1 Authenticate Reason Code
+		variable_header:append(props)							-- DOC: 3.15.2.2 AUTH Properties
+	end
+	-- DOC: 3.15.1 AUTH Fixed Header
+	local header = make_header(packet_type.AUTH, 0, variable_header:len())
 	return combine(header, variable_header)
 end
 
@@ -607,8 +738,9 @@ function protocol5.make_packet(args)
 		-- DOC: 3.12 PINGREQ – PING request
 		return combine("\192\000") -- 192 == 0xC0, type == 12, flags == 0
 	elseif ptype == packet_type.DISCONNECT then
-		-- DOC: 3.14 DISCONNECT – Disconnect notification
-		return combine("\224\000") -- 224 == 0xD0, type == 14, flags == 0
+		return make_packet_disconnect(args)
+	elseif ptype == packet_type.AUTH then
+		return make_packet_auth(args)
 	else
 		error("unexpected packet type to make: "..ptype)
 	end
