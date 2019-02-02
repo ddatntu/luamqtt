@@ -2,6 +2,7 @@
 -- DOC: http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/errata01/os/mqtt-v3.1.1-errata01-os-complete.html
 
 describe("MQTT v3.1.1 protocol: parsing packets", function()
+	local tools = require("mqtt.tools")
 	local protocol = require("mqtt.protocol")
 	local protocol4 = require("mqtt.protocol4")
 
@@ -72,18 +73,17 @@ describe("MQTT v3.1.1 protocol: parsing packets", function()
 
 	it("CONNACK", function()
 		assert.is_false(protocol4.parse_packet(make_read_func_hex("")))
-		--[[
-			20 					packet type == 2 (CONNACK), flags == 0
-			02 					variable length == 2 bytes
-				00 				0-th bit is sp (session present) -- DOC: 3.2.2.2 Session Present
-				00 				CONNACK return code
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.CONNACK, sp=false, rc=0
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"20020000"
+				tools.extract_hex[[
+					20 					-- packet type == 2 (CONNACK), flags == 0
+					02 					-- variable length == 2 bytes
+						00 				-- 0-th bit is sp (session present) -- DOC: 3.2.2.2 Session Present
+						00 				-- CONNACK return code
+				]]
 			))
 		)
 		assert.are.same(
@@ -105,13 +105,6 @@ describe("MQTT v3.1.1 protocol: parsing packets", function()
 	end)
 
 	it("PUBLISH", function()
-		--[[
-			3B 					packet type == 3 (PUBLISH), flags == 0xB == 1011 (dup=true, qos=1, retain=true)
-			15 					variable length == 0x15 == 21 bytes
-				0004 736F6D65 		topic "some"
-				0001 				packet id of PUBLISH packet
-					716F73203D3D20312C206F6B21 		payload to publish: "qos == 1, ok!"
-		]]
 		assert.are.same(
 			{
 				type = protocol.packet_type.PUBLISH,
@@ -123,15 +116,15 @@ describe("MQTT v3.1.1 protocol: parsing packets", function()
 				payload = "qos == 1, ok!",
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"3B150004736F6D650001716F73203D3D20312C206F6B21"
+				tools.extract_hex[[
+					3B 					-- packet type == 3 (PUBLISH), flags == 0xB == 1011 (dup=true, qos=1, retain=true)
+					15 					-- variable length == 0x15 == 21 bytes
+						0004 736F6D65 		-- topic "some"
+						0001 				-- packet id of PUBLISH packet
+							716F73203D3D20312C206F6B21 		-- payload to publish: "qos == 1, ok!"
+				]]
 			))
 		)
-		--[[
-			30 					packet type == 3 (PUBLISH), flags == 0 == 0000 (dup=false, qos=0, retain=false)
-			13 					variable length == 0x13 == 19 bytes
-				0004 736F6D65 		topic "some"
-					716F73203D3D20312C206F6B21 		payload to publish: "qos == 1, ok!"
-		]]
 		assert.are.same(
 			{
 				type = protocol.packet_type.PUBLISH,
@@ -142,169 +135,163 @@ describe("MQTT v3.1.1 protocol: parsing packets", function()
 				payload = "qos == 1, ok!",
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"30130004736F6D65716F73203D3D20312C206F6B21"
+				tools.extract_hex[[
+					30 					-- packet type == 3 (PUBLISH), flags == 0 == 0000 (dup=false, qos=0, retain=false)
+					13 					-- variable length == 0x13 == 19 bytes
+						0004 736F6D65 		-- topic "some"
+							716F73203D3D20312C206F6B21 		-- payload to publish: "qos == 1, ok!"
+				]]
 			))
 		)
 	end)
 
 	it("PUBACK", function()
-		--[[
-			40 					packet type == 4 (PUBACK), flags == 0
-			02 					variable length == 2 bytes
-				0001 			packet id of acknowledged PUBLISH packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.PUBACK, packet_id=1
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"40020001"
+				tools.extract_hex[[
+					40 					-- packet type == 4 (PUBACK), flags == 0
+					02 					-- variable length == 2 bytes
+						0001 			-- packet id of acknowledged PUBLISH packet
+				]]
 			))
 		)
-		--[[
-			40 					packet type == 4 (PUBACK), flags == 0
-			02 					variable length == 2 bytes
-				7FF7 			packet id of acknowledged PUBLISH packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.PUBACK, packet_id=0x7FF7
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"40027FF7"
+				tools.extract_hex[[
+					40 					-- packet type == 4 (PUBACK), flags == 0
+					02 					-- variable length == 2 bytes
+						7FF7 			-- packet id of acknowledged PUBLISH packet
+				]]
 			))
 		)
 	end)
 
 	it("PUBREC", function()
-		--[[
-			50 					packet type == 5 (PUBREC), flags == 0
-			02 					variable length == 2 bytes
-				0001 			packet id of acknowledged PUBLISH packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.PUBREC, packet_id=1
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"50020001"
+				tools.extract_hex[[
+					50 					-- packet type == 5 (PUBREC), flags == 0
+					02 					-- variable length == 2 bytes
+						0001 			-- packet id of acknowledged PUBLISH packet
+				]]
 			))
 		)
-		--[[
-			50 					packet type == 5 (PUBREC), flags == 0
-			02 					variable length == 2 bytes
-				4567 			packet id of acknowledged PUBLISH packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.PUBREC, packet_id=0x4567
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"50024567"
+				tools.extract_hex[[
+					50 					-- packet type == 5 (PUBREC), flags == 0
+					02 					-- variable length == 2 bytes
+						4567 			-- packet id of acknowledged PUBLISH packet
+				]]
 			))
 		)
 	end)
 
 	it("PUBREL", function()
-		--[[
-			62 					packet type == 6 (PUBREL), flags == 2  (reserved bits: 0010)
-			02 					variable length == 2 bytes
-				0001 			packet id of acknowledged PUBLISH packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.PUBREL, packet_id=1
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"62020001"
+				tools.extract_hex[[
+					62 					-- packet type == 6 (PUBREL), flags == 2  (reserved bits: 0010)
+					02 					-- variable length == 2 bytes
+						0001 			-- packet id of acknowledged PUBLISH packet
+				]]
 			))
 		)
-		--[[
-			62 					packet type == 6 (PUBREL), flags == 2 (reserved bits: 0010)
-			02 					variable length == 2 bytes
-				1234 			packet id of acknowledged PUBLISH packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.PUBREL, packet_id=0x1234
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"62021234"
+				tools.extract_hex[[
+					62 					-- packet type == 6 (PUBREL), flags == 2 (reserved bits: 0010)
+					02 					-- variable length == 2 bytes
+						1234 			-- packet id of acknowledged PUBLISH packet
+				]]
 			))
 		)
 	end)
 
 	it("SUBACK", function()
-		--[[
-			90 					packet type == 9 (SUBACK), flags == 0
-			03 					variable length == 3 bytes
-				0001 			packet id of acknowledged SUBSCRIBE packet
-					00 			payload: return code, maximum allowed QoS
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.SUBACK, packet_id=1, rc=0, failure=false,
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"9003000100"
+				tools.extract_hex[[
+					90 					-- packet type == 9 (SUBACK), flags == 0
+					03 					-- variable length == 3 bytes
+						0001 			-- packet id of acknowledged SUBSCRIBE packet
+							00 			-- payload: return code, maximum allowed QoS
+				]]
 			))
 		)
-		--[[
-			90 					packet type == 9 (SUBACK), flags == 0
-			03 					variable length == 3 bytes
-				1234 			packet id of acknowledged SUBSCRIBE packet
-					00 			payload: return code, maximum allowed QoS
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.SUBACK, packet_id=0x1234, rc=0, failure=false,
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"9003123400"
+				tools.extract_hex[[
+					90 					-- packet type == 9 (SUBACK), flags == 0
+					03 					-- variable length == 3 bytes
+						1234 			-- packet id of acknowledged SUBSCRIBE packet
+							00 			-- payload: return code, maximum allowed QoS
+				]]
 			))
 		)
 	end)
 
 	it("UNSUBACK", function()
-		--[[
-			B0 					packet type == 0xB == 11 (UNSUBACK), flags == 0
-			02 					variable length == 2 bytes
-				0001 			packet id of acknowledged UNSUBSCRIBE packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.UNSUBACK, packet_id=1,
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"B0020001"
+				tools.extract_hex[[
+					B0 					-- packet type == 0xB == 11 (UNSUBACK), flags == 0
+					02 					-- variable length == 2 bytes
+						0001 			-- packet id of acknowledged UNSUBSCRIBE packet
+				]]
 			))
 		)
-		--[[
-			B0 					packet type == 0xB == 11 (UNSUBACK), flags == 0
-			02 					variable length == 2 bytes
-				1234 			packet id of acknowledged UNSUBSCRIBE packet
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.UNSUBACK, packet_id=0x1234,
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"B0021234"
+				tools.extract_hex[[
+					B0 					-- packet type == 0xB == 11 (UNSUBACK), flags == 0
+					02 					-- variable length == 2 bytes
+						1234 			-- packet id of acknowledged UNSUBSCRIBE packet
+				]]
 			))
 		)
 	end)
 
 	it("PINGRESP", function()
-		--[[
-			D0 					packet type == 0xD == 13 (PINGRESP), flags == 0
-			00 					variable length == 0 bytes
-		]]
 		assert.are.same(
 			{
 				type=protocol.packet_type.PINGRESP,
 			},
 			protocol4.parse_packet(make_read_func_hex(
-				"D000"
+				tools.extract_hex[[
+					D0 					-- packet type == 0xD == 13 (PINGRESP), flags == 0
+					00 					-- variable length == 0 bytes
+				]]
 			))
 		)
 	end)

@@ -25,6 +25,30 @@ describe("MQTT lua library component test:", function()
 		assert.are.equal("FF00FF", tools.hex("\255\000\255"))
 	end)
 
+	it("tools.extract_hex", function()
+		assert.are.equal("", tools.extract_hex(""))
+		assert.are.equal("", tools.extract_hex(" "))
+		assert.are.equal("", tools.extract_hex("\t"))
+		assert.are.equal("", tools.extract_hex([[
+
+		]]))
+		assert.are.equal("", tools.extract_hex([[
+
+
+		]]))
+		assert.are.equal("01020304", tools.extract_hex("01020304"))
+		assert.are.equal("01020304", tools.extract_hex("01020304    "))
+		assert.are.equal("01020304", tools.extract_hex("    01020304"))
+		assert.are.equal("01020304", tools.extract_hex("    01020304    "))
+		assert.are.equal("01020304", tools.extract_hex("    01020304  -- comment"))
+		assert.are.equal("01020304", tools.extract_hex([[
+			01 -- is 01
+
+			02
+			03 04 -- other comment
+		]]))
+	end)
+
 	it("tools.div", function()
 		assert.are.equal(1, tools.div(3, 2))
 		assert.are.equal(2, tools.div(4, 2))
