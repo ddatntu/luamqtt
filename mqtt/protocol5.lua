@@ -169,6 +169,18 @@ local function parse_uint16(read_func)
 	return lshift(byte1, 8) + byte2
 end
 
+-- Parse uint16 non-zero value using given read_func
+local function parse_uint16_nonzero(read_func)
+	local value, err = parse_uint16(read_func)
+	if not value then
+		return false, err
+	end
+	if value == 0 then
+		return false, "expecting non-zero value"
+	end
+	return value
+end
+
 -- Parse uint32 value using given read_func
 local function parse_uint32(read_func)
 	assert(type(read_func) == "function", "expecting read_func to be a function")
@@ -180,53 +192,65 @@ local function parse_uint32(read_func)
 	return lshift(byte1, 24) + lshift(byte2, 16) + lshift(byte3, 8) + byte4
 end
 
+-- Parse Variable Byte Integer with non-zero constraint
+local function parse_var_length_nonzero(read_func)
+	local value, err = parse_var_length(read_func)
+	if not value then
+		return false, err
+	end
+	if value == 0 then
+		return false, "expecting non-zer value"
+	end
+	return value
+end
+
 -- Known property names and its identifiers, DOC: 2.2.2.2 Property
-local property_pairs = { -- TODO
+local property_pairs = {
 	{ 0x01, "payload_format_indicator",
 		make = make_uint8_0_or_1,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8_0_or_1, },
 	{ 0x02, "message_expiry_interval",
 		make = make_uint32,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint32, },
 	{ 0x03, "content_type",
 		make = make_string,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_string, },
 	{ 0x08, "response_topic",
 		make = make_string,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_string, },
 	{ 0x09, "correlation_data",
-		make = make_string, -- TODO: make_binary_data
-		parse = function(read_func) error("not implemented") end, },
+		make = make_string,
+		parse = parse_string, },
 	{ 0x0B, "subscription_identifier",
 		make = make_var_length_nonzero,
-		parse = function(read_func) error("not implemented") end,
+		parse = parse_var_length_nonzero,
 		multiple = true, },
 	{ 0x11, "session_expiry_interval",
 		make = make_uint32,
 		parse = parse_uint32, },
 	{ 0x12, "assigned_client_identifier",
-		make = function(value) error("not implemented") end,
+		make = make_string,
 		parse = parse_string, },
 	{ 0x13, "server_keep_alive",
-		make = function(value) error("not implemented") end,
+		make = make_uint16,
 		parse = parse_uint16, },
 	{ 0x15, "authentication_method",
 		make = make_string,
 		parse = parse_string, },
 	{ 0x16, "authentication_data",
-		make = make_string, -- TODO: make_binary_data
+		make = make_string,
 		parse = parse_string, },
 	{ 0x17, "request_problem_information",
 		make = make_uint8_0_or_1,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8_0_or_1, },
 	{ 0x18, "will_delay_interval",
 		make = make_uint32,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint32, },
 	{ 0x19, "request_response_information",
 		make = make_uint8_0_or_1,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint8_0_or_1, },
 	{ 0x1A, "response_information",
-		make = function(value) error("not implemented") end,
+		make = make_string,
 		parse = parse_string, },
 	{ 0x1C, "server_reference",
 		make = make_string,
@@ -242,13 +266,13 @@ local property_pairs = { -- TODO
 		parse = parse_uint16, },
 	{ 0x23, "topic_alias",
 		make = make_uint16_nonzero,
-		parse = function(read_func) error("not implemented") end, },
+		parse = parse_uint16_nonzero, },
 	{ 0x24, "maximum_qos",
-		make = function(value) error("not implemented") end,
+		make = make_uint8_0_or_1,
 		parse = parse_uint8_0_or_1, },
 	{ 0x25, "retain_available",
-		make = function(value) error("not implemented") end,
-		parse = parse_uint8, },
+		make = make_uint8_0_or_1,
+		parse = parse_uint8_0_or_1, },
 	{ 0x26, "user_property", -- NOTE: not implemented intentionally
 		make = function(value) error("not implemented") end,
 		parse = function(read_func) error("not implemented") end, },
@@ -256,13 +280,13 @@ local property_pairs = { -- TODO
 		make = make_uint32,
 		parse = parse_uint32, },
 	{ 0x28, "wildcard_subscription_available",
-		make = function(value) error("not implemented") end,
+		make = make_uint8_0_or_1,
 		parse = parse_uint8_0_or_1, },
 	{ 0x29, "subscription_identifier_available",
-		make = function(value) error("not implemented") end,
+		make = make_uint8_0_or_1,
 		parse = parse_uint8_0_or_1, },
 	{ 0x2A, "shared_subscription_available",
-		make = function(value) error("not implemented") end,
+		make = make_uint8_0_or_1,
 		parse = parse_uint8_0_or_1, },
 }
 
@@ -760,6 +784,13 @@ local function parse_properties(ptype, read_data, input, packet)
 	if input.available < len then
 		return true, "not enough data to parse properties of length "..len
 	end
+	-- ensure properties and user_properties are presented in packet
+	if not packet.properties then
+		packet.properties = {}
+	end
+	if not packet.user_properties then
+		packet.user_properties = {}
+	end
 	-- parse allowed properties
 	local uprop_id = properties.user_property
 	local allowed = assert(allowed_properties[ptype], "no allowed properties for specified packet type: "..tostring(ptype))
@@ -809,7 +840,7 @@ end
 function protocol5.parse_packet(read_func)
 	assert(type(read_func) == "function", "expecting read_func to be a function")
 	-- parse fixed header
-	local byte1, byte2, err, len, data, rc
+	local byte1, byte2, err, len, data, rc, ok, packet, topic, packet_id, reason_code
 	byte1, err = read_func(1)
 	if not byte1 then
 		return false, "failed to read first byte: "..err
@@ -830,8 +861,7 @@ function protocol5.parse_packet(read_func)
 	if not data then
 		return false, "failed to read packet data: "..err
 	end
-	local data_len = data:len() -- TODO: remove?
-	input.available = data_len
+	input.available = data:len()
 	-- read data function
 	local function read_data(size)
 		if size > input.available then
@@ -846,24 +876,19 @@ function protocol5.parse_packet(read_func)
 	-- parse readed data according type in fixed header
 	if ptype == packet_type.CONNACK then
 		-- DOC: 3.2 CONNACK – Connect acknowledgement
-		if data_len < 3 then
+		if input.available < 3 then
 			return false, "expecting data of length 3 bytes or more"
 		end
 		-- DOC: 3.2.2.1.1 Session Present
 		-- DOC: 3.2.2.2 Connect Reason Code
 		byte1, byte2 = parse_uint8(read_data), parse_uint8(read_data)
 		local sp = (band(byte1, 0x1) ~= 0)
-		local packet = setmetatable({type=ptype, sp=sp, rc=byte2, properties={}, user_properties={}}, packet_mt)
+		packet = setmetatable({type=ptype, sp=sp, rc=byte2}, packet_mt)
 		-- DOC: 3.2.2.3 CONNACK Properties
-		local ok
 		ok, err = parse_properties(ptype, read_data, input, packet)
 		if not ok then
 			return false, "failed to parse packet properties: "..err
 		end
-		if input.available > 0 then
-			return false, "extra data in remaining length left after packet parsing"
-		end
-		return packet
 	elseif ptype == packet_type.PUBLISH then
 		-- DOC: 3.3 PUBLISH – Publish message
 		-- DOC: 3.3.1.1 DUP
@@ -873,91 +898,197 @@ function protocol5.parse_packet(read_func)
 		-- DOC: 3.3.1.3 RETAIN
 		local retain = (band(flags, 0x1) ~= 0)
 		-- DOC: 3.3.2.1 Topic Name
-		if data_len < 2 then
-			return false, "expecting data of length at least 2 bytes"
+		topic, err = parse_string(read_data)
+		if not topic then
+			return false, "failed to parse topic: "..err
 		end
-		byte1, byte2 = str_byte(data, 1, 2)
-		local topic_len = bor(lshift(byte1, 8), byte2)
-		if data_len < 2 + topic_len then
-			return false, "malformed PUBLISH packet: not enough data to parse topic"
-		end
-		local topic = str_sub(data, 3, 3 + topic_len - 1)
 		-- DOC: 3.3.2.2 Packet Identifier
-		local packet_id, packet_id_len = nil, 0
 		if qos > 0 then
-			-- DOC: 3.3.2.2 Packet Identifier
-			if data_len < 2 + topic_len + 2 then
-				return false, "malformed PUBLISH packet: not enough data to parse packet_id"
+			packet_id, err = parse_uint16(read_data)
+			if not packet_id then
+				return false, "failed to parse packet_id: "..err
 			end
-			byte1, byte2 = str_byte(data, 3 + topic_len, 3 + topic_len + 1)
-			packet_id = bor(lshift(byte1, 8), byte2)
-			packet_id_len = 2
 		end
-		-- DOC: 3.3.3 Payload
-		local payload
-		if data_len > 2 + topic_len + packet_id_len then
-			payload = str_sub(data, 2 + topic_len + packet_id_len + 1)
+		-- DOC: 3.3.2.3 PUBLISH Properties
+		packet = setmetatable({type=ptype, dup=dup, qos=qos, retain=retain, packet_id=packet_id, topic=topic}, packet_mt)
+		ok, err = parse_properties(ptype, read_data, input, packet)
+		if not ok then
+			return false, "failed to parse packet properties: "..err
 		end
-		return setmetatable({type=ptype, dup=dup, qos=qos, retain=retain, packet_id=packet_id, topic=topic, payload=payload}, packet_mt)
+		if input.available > 0 then
+			-- DOC: 3.3.3 PUBLISH Payload
+			packet.payload = read_data(input.available)
+		end
 	elseif ptype == packet_type.PUBACK then
 		-- DOC: 3.4 PUBACK – Publish acknowledgement
-		if data_len ~= 2 then
-			return false, "expecting data of length 2 bytes"
+		packet_id, err = parse_uint16(read_data)
+		if not packet_id then
+			return false, "failed to parse packet_id: "..err
 		end
-		-- DOC: 3.4.2 Variable header
-		byte1, byte2 = str_byte(data, 1, 2)
-		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+		packet = setmetatable({type=ptype, packet_id=packet_id, reason_code=0, properties={}, user_properties={}}, packet_mt)
+		if input.available > 0 then
+			-- DOC: 3.4.2.1 PUBACK Reason Code
+			reason_code, err = parse_uint8(read_data)
+			if not reason_code then
+				return false, "failed to parse reason_code: "..err
+			end
+			packet.reason_code = reason_code
+			-- DOC: 3.4.2.2 PUBACK Properties
+			ok, err = parse_properties(ptype, read_data, input, packet)
+			if not ok then
+				return false, "failed to parse packet properties: "..err
+			end
+		end
 	elseif ptype == packet_type.PUBREC then
-		-- DOC: 3.5 PUBREC – Publish received (QoS 2 publish received, part 1)
-		if data_len ~= 2 then
-			return false, "expecting data of length 2 bytes"
+		-- DOC: 3.5 PUBREC – Publish received (QoS 2 delivery part 1)
+		packet_id, err = parse_uint16(read_data)
+		if not packet_id then
+			return false, "failed to parse packet_id: "..err
 		end
-		-- DOC: 3.5.2 Variable header
-		byte1, byte2 = str_byte(data, 1, 2)
-		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+		packet = setmetatable({type=ptype, packet_id=packet_id, reason_code=0, properties={}, user_properties={}}, packet_mt)
+		if input.available > 0 then
+			-- DOC: 3.5.2.1 PUBREC Reason Code
+			reason_code, err = parse_uint8(read_data)
+			if not reason_code then
+				return false, "failed to parse reason_code: "..err
+			end
+			packet.reason_code = reason_code
+			-- DOC: 3.5.2.2 PUBREC Properties
+			ok, err = parse_properties(ptype, read_data, input, packet)
+			if not ok then
+				return false, "failed to parse packet properties: "..err
+			end
+		end
 	elseif ptype == packet_type.PUBREL then
-		-- DOC: 3.6 PUBREL – Publish release (QoS 2 publish received, part 2)
-		if data_len ~= 2 then
-			return false, "expecting data of length 2 bytes"
+		-- DOC: 3.6 PUBREL – Publish release (QoS 2 delivery part 2)
+		packet_id, err = parse_uint16(read_data)
+		if not packet_id then
+			return false, "failed to parse packet_id: "..err
 		end
-		-- also flags should be checked to equals 2 by the server
-		-- DOC: 3.6.2 Variable header
-		byte1, byte2 = str_byte(data, 1, 2)
-		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+		packet = setmetatable({type=ptype, packet_id=packet_id, reason_code=0, properties={}, user_properties={}}, packet_mt)
+		if input.available > 0 then
+			-- DOC: 3.6.2.1 PUBREL Reason Code
+			reason_code, err = parse_uint8(read_data)
+			if not reason_code then
+				return false, "failed to parse reason_code: "..err
+			end
+			packet.reason_code = reason_code
+			-- DOC: 3.6.2.2 PUBREL Properties
+			ok, err = parse_properties(ptype, read_data, input, packet)
+			if not ok then
+				return false, "failed to parse packet properties: "..err
+			end
+		end
 	elseif ptype == packet_type.PUBCOMP then
-		-- 3.7 PUBCOMP – Publish complete (QoS 2 publish received, part 3)
-		if data_len ~= 2 then
-			return false, "expecting data of length 2 bytes"
+		-- DOC: 3.7 PUBCOMP – Publish complete (QoS 2 delivery part 3)
+		packet_id, err = parse_uint16(read_data)
+		if not packet_id then
+			return false, "failed to parse packet_id: "..err
 		end
-		-- DOC: 3.7.2 Variable header
-		byte1, byte2 = str_byte(data, 1, 2)
-		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+		packet = setmetatable({type=ptype, packet_id=packet_id, reason_code=0, properties={}, user_properties={}}, packet_mt)
+		if input.available > 0 then
+			-- DOC: 3.7.2.1 PUBCOMP Reason Code
+			reason_code, err = parse_uint8(read_data)
+			if not reason_code then
+				return false, "failed to parse reason_code: "..err
+			end
+			packet.reason_code = reason_code
+			-- DOC: 3.7.2.2 PUBCOMP Properties
+			ok, err = parse_properties(ptype, read_data, input, packet)
+			if not ok then
+				return false, "failed to parse packet properties: "..err
+			end
+		end
 	elseif ptype == packet_type.SUBACK then
 		-- DOC: 3.9 SUBACK – Subscribe acknowledgement
-		if data_len ~= 3 then
-			return false, "expecting data of length 3 bytes"
+		-- DOC: 3.9.2 SUBACK Variable Header
+		packet_id, err = parse_uint16(read_data)
+		if not packet_id then
+			return false, "failed to parse packet_id: "..err
 		end
-		-- DOC: 3.9.2 Variable header
-		-- DOC: 3.9.3 Payload
-		byte1, byte2, rc = str_byte(data, 1, 3)
-		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2), rc=rc, failure=(rc == 0x80)}, packet_mt)
+		-- DOC: 3.9.2.1 SUBACK Properties
+		packet = setmetatable({type=ptype, packet_id=packet_id}, packet_mt)
+		ok, err = parse_properties(ptype, read_data, input, packet)
+		if not ok then
+			return false, "failed to parse packet properties: "..err
+		end
+		-- DOC: 3.9.3 SUBACK Payload
+		local reason_codes = {}
+		while input.available > 0 do
+			rc, err = parse_uint8(read_data)
+			if not rc then
+				return false, "failed to parse reason code: "..err
+			end
+			reason_codes[#reason_codes + 1] = rc
+		end
+		if not next(reason_codes) then
+			return false, "expecting at least one reason code in SUBACK"
+		end
+		packet.reason_codes = reason_codes -- TODO: reason codes table somewhere should be placed
 	elseif ptype == packet_type.UNSUBACK then
 		-- DOC: 3.11 UNSUBACK – Unsubscribe acknowledgement
-		if data_len ~= 2 then
-			return false, "expecting data of length 2 bytes"
+		-- DOC: 3.11.2 UNSUBACK Variable Header
+		packet_id, err = parse_uint16(read_data)
+		if not packet_id then
+			return false, "failed to parse packet_id: "..err
 		end
-		-- DOC: 3.11.2 Variable header
-		byte1, byte2 = str_byte(data, 1, 2)
-		return setmetatable({type=ptype, packet_id=bor(lshift(byte1, 8), byte2)}, packet_mt)
+		-- 3.11.2.1 UNSUBACK Properties
+		packet = setmetatable({type=ptype, packet_id=packet_id}, packet_mt)
+		ok, err = parse_properties(ptype, read_data, input, packet)
+		if not ok then
+			return false, "failed to parse packet properties: "..err
+		end
+		-- 3.11.3 UNSUBACK Payload
+		local reason_codes = {}
+		while input.available > 0 do
+			rc, err = parse_uint8(read_data)
+			if not rc then
+				return false, "failed to parse reason code: "..err
+			end
+			reason_codes[#reason_codes + 1] = rc
+		end
+		if not next(reason_codes) then
+			return false, "expecting at least one reason code in UNSUBACK"
+		end
+		packet.reason_codes = reason_codes
 	elseif ptype == packet_type.PINGRESP then
 		-- DOC: 3.13 PINGRESP – PING response
-		if data_len ~= 0 then
-			return false, "expecting data of length 0 bytes"
+		packet = setmetatable({type=ptype, properties={}, user_properties={}}, packet_mt)
+	elseif ptype == packet_type.DISCONNECT then
+		-- DOC: 3.14 DISCONNECT – Disconnect notification
+		packet = setmetatable({type=ptype, reason_code=0, properties={}, user_properties={}}, packet_mt)
+		if input.available > 0 then
+			-- DOC: 3.14.2.1 Disconnect Reason Code
+			reason_code, err = parse_uint8(read_data) -- TODO: reason codes table
+			if not reason_code then
+				return false, "failed to parse reason_code: "..err
+			end
+			-- DOC: 3.14.2.2 DISCONNECT Properties
+			ok, err = parse_properties(ptype, read_data, input, packet)
+			if not ok then
+				return false, "failed to parse packet properties: "..err
+			end
 		end
-		return setmetatable({type=ptype}, packet_mt)
+	elseif ptype == packet_type.AUTH then
+		-- DOC: 3.15 AUTH – Authentication exchange
+		-- DOC: 3.15.2.1 Authenticate Reason Code
+		reason_code, err = parse_uint8(read_data) -- TODO: table
+		if not reason_code then
+			return false, "failed to parse Authenticate Reason Code: "..err
+		end
+		-- DOC: 3.15.2.2 AUTH Properties
+		packet = setmetatable({type=ptype, reason_code=reason_code}, packet_mt)
+		ok, err = parse_properties(ptype, read_data, input, packet)
+		if not ok then
+			return false, "failed to parse packet properties: "..err
+		end
 	else
 		return false, "unexpected packet type received: "..tostring(ptype)
 	end
+	if input.available > 0 then
+		return false, "extra data in remaining length left after packet parsing"
+	end
+	return packet
 end
 
 -- export module table
