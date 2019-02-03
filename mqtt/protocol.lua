@@ -57,12 +57,13 @@ protocol.versions = {
 }
 
 -- Create uint8 value data
-function protocol.make_uint8(val)
+local function make_uint8(val)
 	if val < 0 or val > 0xFF then
 		error("value is out of range to encode as uint8: "..tostring(val))
 	end
 	return str_char(val)
 end
+protocol.make_uint8 = make_uint8
 
 -- Create uint16 value data
 local function make_uint16(val)
@@ -109,6 +110,140 @@ local function make_var_length(len)
 	return unpack(bytes)
 end
 protocol.make_var_length = make_var_length
+
+-- Make data for 1-byte property with only 0 or 1 value
+function protocol.make_uint8_0_or_1(value)
+	if value ~= 0 and value ~= 1 then
+		error("expecting 0 or 1 as value")
+	end
+	return make_uint8(value)
+end
+
+-- Make data for 2-byte property with nonzero value check
+function protocol.make_uint16_nonzero(value)
+	if value == 0 then
+		error("expecting nonzero value")
+	end
+	return make_uint16(value)
+end
+
+-- Make data for variable length property with nonzero value check
+function protocol.make_var_length_nonzero(value)
+	if value == 0 then
+		error("expecting nonzero value")
+	end
+	return make_var_length(value)
+end
+
+-- Read string using given read_func function
+-- Returns false plus error message on failure
+-- Returns parsed string on success
+function protocol.parse_string(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local len, err = read_func(2)
+	if not len then
+		return false, "failed to read string length: "..err
+	end
+	-- convert len string from 2-byte integer
+	local byte1, byte2 = str_byte(len, 1, 2)
+	len = bor(lshift(byte1, 8), byte2)
+	-- and return string if parsed length
+	return read_func(len)
+end
+
+-- Parse uint8 value using given read_func
+local function parse_uint8(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local value, err = read_func(1)
+	if not value then
+		return false, "failed to read 1 byte for uint8: "..err
+	end
+	return str_byte(value, 1, 1)
+end
+protocol.parse_uint8 = parse_uint8
+
+-- Parse uint8 value with only 0 or 1 value
+function protocol.parse_uint8_0_or_1(read_func)
+	local value, err = parse_uint8(read_func)
+	if not value then
+		return false, err
+	end
+	if value ~= 0 and value ~= 1 then
+		return false, "expecting only 0 or 1 but got: "..value
+	end
+	return value
+end
+
+-- Parse uint16 value using given read_func
+local function parse_uint16(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local value, err = read_func(2)
+	if not value then
+		return false, "failed to read 2 byte for uint16: "..err
+	end
+	local byte1, byte2 = str_byte(value, 1, 2)
+	return lshift(byte1, 8) + byte2
+end
+protocol.parse_uint16 = parse_uint16
+
+-- Parse uint16 non-zero value using given read_func
+function protocol.parse_uint16_nonzero(read_func)
+	local value, err = parse_uint16(read_func)
+	if not value then
+		return false, err
+	end
+	if value == 0 then
+		return false, "expecting non-zero value"
+	end
+	return value
+end
+
+-- Parse uint32 value using given read_func
+function protocol.parse_uint32(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local value, err = read_func(4)
+	if not value then
+		return false, "failed to read 4 byte for uint32: "..err
+	end
+	local byte1, byte2, byte3, byte4 = str_byte(value, 1, 4)
+	return lshift(byte1, 24) + lshift(byte2, 16) + lshift(byte3, 8) + byte4
+end
+
+-- Max variable length integer value
+local max_mult = 128 * 128 * 128
+
+-- Returns variable length field value calling read_func function read data, DOC: 2.2.3 Remaining Length
+local function parse_var_length(read_func)
+	assert(type(read_func) == "function", "expecting read_func to be a function")
+	local mult = 1
+	local val = 0
+	repeat
+		local byte, err = read_func(1)
+		if not byte then
+			return false, err
+		end
+		byte = str_byte(byte, 1, 1)
+		val = val + band(byte, 127) * mult
+		if mult > max_mult then
+			return false, "malformed variable length field data"
+		end
+		mult = mult * 128
+	until band(byte, 128) == 0
+	return val
+end
+protocol.parse_var_length = parse_var_length
+
+-- Parse Variable Byte Integer with non-zero constraint
+function protocol.parse_var_length_nonzero(read_func)
+	local value, err = parse_var_length(read_func)
+	if not value then
+		return false, err
+	end
+	if value == 0 then
+		return false, "expecting non-zero value"
+	end
+	return value
+end
 
 -- Create fixed packet header data
 -- DOCv3.1.1: 2.2 Fixed header
@@ -242,29 +377,6 @@ end
 -- Combine several data parts into one
 function protocol.combine(...)
 	return setmetatable({...}, combined_packet_mt)
-end
-
--- Max variable length integer value
-local max_mult = 128 * 128 * 128
-
--- Returns variable length field value calling read_func function read data, DOC: 2.2.3 Remaining Length
-function protocol.parse_var_length(read_func)
-	assert(type(read_func) == "function", "expecting read_func to be a function")
-	local mult = 1
-	local val = 0
-	repeat
-		local byte, err = read_func(1)
-		if not byte then
-			return false, err
-		end
-		byte = str_byte(byte, 1, 1)
-		val = val + band(byte, 127) * mult
-		if mult > max_mult then
-			return false, "malformed variable length field data"
-		end
-		mult = mult * 128
-	until band(byte, 128) == 0
-	return val
 end
 
 -- Convert table to string in human-readable form

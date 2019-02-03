@@ -6,37 +6,6 @@ describe("MQTT v3.1.1 protocol: parsing packets", function()
 	local protocol = require("mqtt.protocol")
 	local protocol4 = require("mqtt.protocol4")
 
-	it("protocol.parse_var_length", function()
-		-- returns read_func-compatible function
-		local function make_read_func(data)
-			local i = 0
-			return function(_)
-				i = i + 1
-				if i <= #data then
-					return string.char(data[i])
-				else
-					return false, "no more data available"
-				end
-			end
-		end
-
-		assert.is_false(protocol.parse_var_length(make_read_func{}))
-
-		-- DOC: Table 2.4 Size of Remaining Length field
-		assert.are.equal(0, protocol.parse_var_length(make_read_func{0x00}))
-		assert.are.equal(1, protocol.parse_var_length(make_read_func{0x01}))
-		assert.are.equal(127, protocol.parse_var_length(make_read_func{0x7F}))
-		assert.are.equal(128, protocol.parse_var_length(make_read_func{0x80, 0x01}))
-		assert.are.equal(16383, protocol.parse_var_length(make_read_func{0xFF, 0x7F}))
-		assert.are.equal(16384, protocol.parse_var_length(make_read_func{0x80, 0x80, 0x01}))
-		assert.are.equal(2097151, protocol.parse_var_length(make_read_func{0xFF, 0xFF, 0x7F}))
-		assert.are.equal(2097152, protocol.parse_var_length(make_read_func{0x80, 0x80, 0x80, 0x01}))
-		assert.are.equal(268435455, protocol.parse_var_length(make_read_func{0xFF, 0xFF, 0xFF, 0x7F}))
-
-		assert.is_false(protocol.parse_var_length(make_read_func{0xFF, 0xFF, 0xFF, 0x7F + 1}))
-		assert.is_false(protocol.parse_var_length(make_read_func{0xFF, 0xFF, 0xFF, 0xFF}))
-	end)
-
 	-- returns read_func-compatible function
 	local function make_read_func_hex(hex)
 		-- decode hex string into data

@@ -39,11 +39,21 @@ local make_uint16 = protocol.make_uint16
 local make_uint32 = protocol.make_uint32
 local make_string = protocol.make_string
 local make_var_length = protocol.make_var_length
+local parse_var_length = protocol.parse_var_length
+local make_uint8_0_or_1 = protocol.make_uint8_0_or_1
+local make_uint16_nonzero = protocol.make_uint16_nonzero
+local make_var_length_nonzero = protocol.make_var_length_nonzero
+local parse_string = protocol.parse_string
+local parse_uint8 = protocol.parse_uint8
+local parse_uint8_0_or_1 = protocol.parse_uint8_0_or_1
+local parse_uint16 = protocol.parse_uint16
+local parse_uint16_nonzero = protocol.parse_uint16_nonzero
+local parse_uint32 = protocol.parse_uint32
+local parse_var_length_nonzero = protocol.parse_var_length_nonzero
 local make_header = protocol.make_header
 local check_qos = protocol.check_qos
 local check_packet_id = protocol.check_packet_id
 local combine = protocol.combine
-local parse_var_length = protocol.parse_var_length
 local packet_type = protocol.packet_type
 local packet_mt = protocol.packet_mt
 
@@ -96,114 +106,6 @@ local function make_connect_flags(args)
 	return make_uint8(byte)
 end
 
--- Make data for 1-byte property with only 0 or 1 value
-local function make_uint8_0_or_1(value)
-	if value ~= 0 and value ~= 1 then
-		error("expecting 0 or 1 as value")
-	end
-	return make_uint8(value)
-end
-
--- Make data for 2-byte property with nonzero value check
-local function make_uint16_nonzero(value)
-	if value == 0 then
-		error("expecting nonzero value")
-	end
-	return make_uint16(value)
-end
-
--- Make data for variable length property with nonzero value check
-local function make_var_length_nonzero(value)
-	if value == 0 then
-		error("expecting nonzero value")
-	end
-	return str_char(make_var_length(value))
-end
-
--- Read string using given read_func function
--- Returns false plus error message on failure
--- Returns parsed string on success
-local function parse_string(read_func)
-	assert(type(read_func) == "function", "expecting read_func to be a function")
-	local len, err = read_func(2)
-	if not len then
-		return false, "failed to read string length: "..err
-	end
-	-- convert len string from 2-byte integer
-	local byte1, byte2 = str_byte(len, 1, 2)
-	len = bor(lshift(byte1, 8), byte2)
-	-- and return string if parsed length
-	return read_func(len)
-end
-
--- Parse uint8 value using given read_func
-local function parse_uint8(read_func)
-	assert(type(read_func) == "function", "expecting read_func to be a function")
-	local value, err = read_func(1)
-	if not value then
-		return false, "failed to read 1 byte for uint8: "..err
-	end
-	return str_byte(value, 1, 1)
-end
-
--- Parse uint8 value with only 0 or 1 value
-local function parse_uint8_0_or_1(read_func)
-	local value, err = parse_uint8(read_func)
-	if not value then
-		return false, err
-	end
-	if value ~= 0 and value ~= 1 then
-		return false, "expecting only 0 or 1 but got: "..value
-	end
-	return value
-end
-
--- Parse uint16 value using given read_func
-local function parse_uint16(read_func)
-	assert(type(read_func) == "function", "expecting read_func to be a function")
-	local value, err = read_func(2)
-	if not value then
-		return false, "failed to read 2 byte for uint16: "..err
-	end
-	local byte1, byte2 = str_byte(value, 1, 2)
-	return lshift(byte1, 8) + byte2
-end
-
--- Parse uint16 non-zero value using given read_func
-local function parse_uint16_nonzero(read_func)
-	local value, err = parse_uint16(read_func)
-	if not value then
-		return false, err
-	end
-	if value == 0 then
-		return false, "expecting non-zero value"
-	end
-	return value
-end
-
--- Parse uint32 value using given read_func
-local function parse_uint32(read_func)
-	assert(type(read_func) == "function", "expecting read_func to be a function")
-	local value, err = read_func(4)
-	if not value then
-		return false, "failed to read 4 byte for uint32: "..err
-	end
-	local byte1, byte2, byte3, byte4 = str_byte(value, 1, 4)
-	return lshift(byte1, 24) + lshift(byte2, 16) + lshift(byte3, 8) + byte4
-end
-
--- Parse Variable Byte Integer with non-zero constraint
-local function parse_var_length_nonzero(read_func)
-	local value, err = parse_var_length(read_func)
-	if not value then
-		return false, err
-	end
-	if value == 0 then
-		return false, "expecting non-zer value"
-	end
-	return value
-end
-
 -- Known property names and its identifiers, DOC: 2.2.2.2 Property
 local property_pairs = {
 	{ 0x01, "payload_format_indicator",
@@ -222,7 +124,7 @@ local property_pairs = {
 		make = make_string,
 		parse = parse_string, },
 	{ 0x0B, "subscription_identifier",
-		make = make_var_length_nonzero,
+		make = function(value) return str_char(make_var_length_nonzero(value)) end,
 		parse = parse_var_length_nonzero,
 		multiple = true, },
 	{ 0x11, "session_expiry_interval",
