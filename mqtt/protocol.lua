@@ -206,7 +206,11 @@ function protocol.parse_uint32(read_func)
 		return false, "failed to read 4 byte for uint32: "..err
 	end
 	local byte1, byte2, byte3, byte4 = str_byte(value, 1, 4)
-	return lshift(byte1, 24) + lshift(byte2, 16) + lshift(byte3, 8) + byte4
+	if _VERSION < "Lua 5.3" then
+		return byte1 * (2 ^ 24) + lshift(byte2, 16) + lshift(byte3, 8) + byte4
+	else
+		return lshift(byte1, 24) + lshift(byte2, 16) + lshift(byte3, 8) + byte4
+	end
 end
 
 -- Max variable length integer value
