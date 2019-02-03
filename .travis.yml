@@ -5,6 +5,7 @@ before_install:
   # libssl-dev is used to build luasec
   # git is used to install luabitop
   - sudo apt-get install -y luarocks libssl-dev git
+  - lua -v
   - sudo luarocks install luabitop
   - sudo luarocks install busted
   # luasec depends on luasocket but it's breaking luarocks on trusty, so it should be placed last
