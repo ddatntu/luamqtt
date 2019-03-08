@@ -73,7 +73,6 @@ describe("MQTT lua library component test:", function()
 		assert.has.errors(function() protocol.make_var_length(268435455 + 1) end)
 	end)
 
-
 	it("protocol.make_var_length_nonzero", function()
 		-- DOC v3.1.1: 2.2.3 Remaining Length
 		-- DOC v5.0: 1.5.5 Variable Byte Integer
@@ -274,7 +273,6 @@ describe("MQTT lua library component test:", function()
 		assert.is_true(protocol.check_packet_id(2))
 		assert.is_true(protocol.check_packet_id(10))
 		assert.is_true(protocol.check_packet_id(100))
-		assert.is_true(protocol.check_packet_id(1))
 		assert.is_true(protocol.check_packet_id(0xFFFF - 1))
 		assert.is_true(protocol.check_packet_id(0xFFFF))
 		assert.is_false(protocol.check_packet_id(0xFFFF + 1))
