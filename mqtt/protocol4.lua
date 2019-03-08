@@ -17,7 +17,7 @@ protocol4.version = "v3.1.1"
 
 -- required modules
 local string = require("string")
-local bit = require("mqtt.bit")
+local bit = require("mqtt.bitwrap")
 local protocol = require("mqtt.protocol")
 
 

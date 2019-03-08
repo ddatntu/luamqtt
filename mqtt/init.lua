@@ -43,7 +43,7 @@ local os_time = os.time
 local packet_type = protocol.packet_type
 local make_packet4 = protocol4.make_packet
 local parse_packet4 = protocol4.parse_packet
-local connack_return_code = protocol.connack_return_code
+local connack_return_code = protocol4.connack_return_code
 local next_packet_id = protocol.next_packet_id
 local packet_id_required = protocol.packet_id_required
 local packet_tostring = protocol.packet_tostring
@@ -88,6 +88,10 @@ local client_mt = {
 		self.ssl = args.ssl
 		if self.ssl ~= nil then
 			assert(type(self.ssl) == "boolean" or type(self.ssl) == "table", "expecting .ssl to be a boolean or table")
+		end
+		self.ssl_module = args.ssl_module
+		if self.ssl_module ~= nil then
+			assert(type(self.ssl_module) == "string", "expecting .ssl_module to be a string")
 		end
 		self.clean = args.clean
 		assert(type(self.clean) == "boolean", "expecting .clean to be a boolean")
@@ -340,6 +344,7 @@ local client_mt = {
 		local packet, perr = self:_wait_packet_queue()
 		if not packet then
 			perr = "waiting for the next packet failed: "..perr
+			self:close_connection()
 			self.handlers.error(perr)
 			return false, perr
 		end
@@ -359,7 +364,10 @@ local client_mt = {
 		-- start packet receiving loop
 		while self.connection do
 			-- just receive one packet on each iteration
-			self:receive_iteration()
+			local ok, err = self:receive_iteration()
+			if not ok then
+				return false, err
+			end
 		end
 		return true
 	end,
@@ -497,7 +505,7 @@ local client_mt = {
 
 	-- Return and remove first packet in received queue or wait and receive the next packet
 	_wait_packet_queue = function(self)
-		if self.connection.queue[1] then
+		if self.connection and self.connection.queue[1] then
 			-- remove already received packet from queue and return it
 			return tbl_remove(self.connection.queue, 1)
 		end
@@ -551,6 +559,7 @@ local client_mt = {
 				options = "all",
 			}
 		end
+		conn.ssl_module = self.ssl_module
 	end,
 
 	-- Assign next packet ID to the args
