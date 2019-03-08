@@ -1,12 +1,11 @@
 -- module table
 local tools = {}
 
--- required modules
+-- load required stuff
+local require = require
 local math = require("math")
 local table = require("table")
 local string = require("string")
-
--- cache to locals
 local str_format = string.format
 local str_byte = string.byte
 local tbl_concat = table.concat

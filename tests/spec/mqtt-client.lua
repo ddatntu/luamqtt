@@ -1,4 +1,4 @@
--- busted -e 'package.path="./?/init.lua;"..package.path;' spec/*.lua
+-- busted -e 'package.path="./?/init.lua;./?.lua;"..package.path' tests/spec/mqtt-client.lua
 -- DOC: http://docs.oasis-open.org/mqtt/mqtt/v3.1.1/errata01/os/mqtt-v3.1.1-errata01-os-complete.html
 
 describe("MQTT lua library", function()
@@ -37,14 +37,14 @@ describe("MQTT client", function()
 				auth = {username = "stPwSVV73Eqw5LSv0iMXbc4EguS7JyuZR9lxU5uLxI5tiNM8ToTVqNpu85pFtJv9"},
 			},
 			{
-				name = "test.mosquitto.org no SSL",
+				name = "test.mosquitto.org no SSL, MQTTv3.1.1",
 				id = "luamqtt-test-mosquitto",
 				debug = client_debug,
 				uri = "test.mosquitto.org", -- NOTE: this broker is not working sometimes
 				clean = true,
 			},
 			{
-				name = "test.mosquitto.org SSL",
+				name = "test.mosquitto.org SSL, MQTTv3.1.1",
 				-- id = "luamqtt-test-mosquitto", -- testing randomly generated client id
 				debug = client_debug,
 				uri = "test.mosquitto.org",
@@ -52,14 +52,14 @@ describe("MQTT client", function()
 				clean = true,
 			},
 			{
-				name = "mqtt.fluux.io no SSL",
+				name = "mqtt.fluux.io no SSL, MQTTv3.1.1",
 				id = "luamqtt-test-fluux",
 				debug = client_debug,
 				uri = "mqtt.fluux.io",
 				clean = true,
 			},
 			{
-				name = "mqtt.fluux.io SSL",
+				name = "mqtt.fluux.io SSL, MQTTv3.1.1",
 				-- id = "luamqtt-test-fluux", -- testing randomly generated client id
 				debug = client_debug,
 				uri = "mqtt.fluux.io",

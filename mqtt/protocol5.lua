@@ -18,7 +18,7 @@ protocol5.version = "v5.0"
 -- required modules
 local table = require("table")
 local string = require("string")
-local bit = require("mqtt.bit")
+local bit = require("mqtt.bitwrap")
 local protocol = require("mqtt.protocol")
 
 -- cache to locals
