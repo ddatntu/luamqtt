@@ -129,7 +129,7 @@ local property_pairs = {
 	{ 0x09, "correlation_data",
 		make = make_string,
 		parse = parse_string, },
-	{ 0x0B, "subscription_identifier",
+	{ 0x0B, "subscription_identifiers",
 		make = function(value) return str_char(make_var_length_nonzero(value)) end,
 		parse = parse_var_length_nonzero,
 		multiple = true, },

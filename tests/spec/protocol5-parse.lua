@@ -56,7 +56,7 @@ describe("MQTT v5.0 protocol: parsing packets", function()
 		assert.are.same(
 			packet,
 			{
-				type=pt.CONNACK, sp=false, rc=0, properties={}, user_properties={}
+				type=pt.CONNACK, sp=false, rc=0, properties={}, user_properties={},
 			}
 		)
 	end)
@@ -75,7 +75,7 @@ describe("MQTT v5.0 protocol: parsing packets", function()
 		assert.are.same(
 			packet,
 			{
-				type=pt.CONNACK, sp=true, rc=0x8A, properties={}, user_properties={}
+				type=pt.CONNACK, sp=true, rc=0x8A, properties={}, user_properties={},
 			}
 		)
 	end)
@@ -139,7 +139,148 @@ describe("MQTT v5.0 protocol: parsing packets", function()
 					hello = "again",
 					{"hello", "world"},
 					{"hello", "again"},
-				}
+				},
+			}
+		)
+	end)
+
+	it("PUBLISH with minimal params, without payload and without properties", function()
+		local packet, err = protocol5.parse_packet(make_read_func_hex(
+			tools.extract_hex[[
+				30 					-- packet type == 2 (PUBLISH), flags == 0, dup=0, qos=0, retain=0
+
+				07 					-- variable length == 3 bytes
+
+					0004 74657374	-- topic name == "test"
+					00				-- properties length
+			]]
+		))
+		assert.is_nil(err)
+		assert.are.same(
+			packet,
+			{
+				type=pt.PUBLISH, dup=false, qos=0, retain=false, topic="test", properties={}, user_properties={},
+			}
+		)
+	end)
+
+	it("PUBLISH with minimal params, with payload and without properties", function()
+		local packet, err = protocol5.parse_packet(make_read_func_hex(
+			tools.extract_hex[[
+				39 					-- packet type == 2 (PUBLISH), flags == 0, dup=1, qos=0, retain=1
+
+				0B 					-- variable length == 3 bytes
+
+					0004 74657374	-- topic name == "test"
+					00				-- properties length
+
+					6B756B75		-- payload == "kuku"
+			]]
+		))
+		assert.is_nil(err)
+		assert.are.same(
+			packet,
+			{
+				type=pt.PUBLISH, dup=true, qos=0, retain=true, topic="test", payload="kuku", properties={}, user_properties={},
+			}
+		)
+	end)
+
+	it("PUBLISH with full params, with payload and without properties", function()
+		local packet, err = protocol5.parse_packet(make_read_func_hex(
+			tools.extract_hex[[
+				3D 					-- packet type == 2 (PUBLISH), flags == 0, dup=1, qos=2, retain=1
+
+				0D 					-- variable length == 3 bytes
+
+					0004 74657374	-- topic name == "test"
+					1234			-- packet identifier == 0x1234
+					00				-- properties length
+
+					6B756B75		-- payload == "kuku"
+			]]
+		))
+		assert.is_nil(err)
+		assert.are.same(
+			packet,
+			{
+				type=pt.PUBLISH, dup=true, qos=2, packet_id=0x1234, retain=true, topic="test", payload="kuku", properties={}, user_properties={},
+			}
+		)
+	end)
+
+	it("PUBLISH with full params, with payload and full properties", function()
+		local packet, err = protocol5.parse_packet(make_read_func_hex(
+			tools.extract_hex[[
+				3D 					-- packet type == 2 (PUBLISH), flags == 0, dup=1, qos=2, retain=1
+
+				43 					-- variable length == 0x48 == 72 bytes
+
+					0004 74657374	-- topic name == "test"
+					1234			-- packet identifier == 0x1234
+					36				-- properties length == 0x3B == 59 bytes
+
+					01 01			-- property 0x01 == 1 -- DOC: 3.3.2.3.2 Payload Format Indicator
+					02 0000012C		-- property 0x02 == 300 -- DOC: 3.3.2.3.3 Message Expiry Interval
+					23 0002			-- property 0x23 == 2 -- DOC: 3.3.2.3.4 Topic Alias
+					08 0007 6865792F707562	-- property 0x08 == "hey/pub" -- DOC: 3.3.2.3.5 Response Topic
+					09 0002 3230	-- property 0x09 == "20" -- DOC: 3.3.2.3.6 Correlation Data
+					0B 02			-- property 0x0B == 2 -- DOC: 3.3.2.3.8 Subscription Identifier
+					03 0009 696D6167652F706E67	-- property 0x03 == "image/png" -- DOC: 3.3.2.3.9 Content Type
+					26 0005 68656C6C6F 0005 776F726C64	-- property 0x26 (user) == ("hello", "world")  -- DOC: 3.2.2.3.10 User Property
+
+					6B756B75		-- payload == "kuku"
+			]]
+		))
+		assert.is_nil(err)
+		assert.are.same(
+			packet,
+			{
+				type=pt.PUBLISH, dup=true, qos=2, packet_id=0x1234, retain=true, topic="test", payload="kuku",
+				properties={
+					payload_format_indicator = 1,
+					message_expiry_interval = 300,
+					topic_alias = 2,
+					response_topic = "hey/pub",
+					correlation_data = "20",
+					subscription_identifiers = {2}, -- , 3, 2048
+					content_type = "image/png",
+				},
+				user_properties={
+					hello = "world",
+				},
+			}
+		)
+	end)
+
+	it("PUBLISH with full params, with payload and several subscription identifiers in properties", function()
+		local packet, err = protocol5.parse_packet(make_read_func_hex(
+			tools.extract_hex[[
+				3D 					-- packet type == 2 (PUBLISH), flags == 0, dup=1, qos=2, retain=1
+
+				14 					-- variable length == 0x48 == 72 bytes
+
+					0004 74657374	-- topic name == "test"
+					1234			-- packet identifier == 0x1234
+					07				-- properties length == 0x3B == 59 bytes
+
+					0B 02			-- property 0x0B == 2 -- DOC: 3.3.2.3.8 Subscription Identifier
+					0B 03			-- property 0x0B == 3 -- DOC: 3.3.2.3.8 Subscription Identifier
+					0B 8010			-- property 0x0B == 0x8001 as variable length field == 2048 -- DOC: 3.3.2.3.8 Subscription Identifier
+
+					6B756B75		-- payload == "kuku"
+			]]
+		))
+		assert.is_nil(err)
+		assert.are.same(
+			packet,
+			{
+				type=pt.PUBLISH, dup=true, qos=2, packet_id=0x1234, retain=true, topic="test", payload="kuku",
+				properties={
+					subscription_identifiers = {2, 3, 2048}
+				},
+				user_properties={
+				},
 			}
 		)
 	end)
