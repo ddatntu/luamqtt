@@ -6,7 +6,31 @@ describe("MQTT v3.1.1 protocol: making packets", function()
 	local protocol = require("mqtt.protocol")
 	local protocol4 = require("mqtt.protocol4")
 
-	it("CONNECT with full properties", function()
+	it("CONNECT with minimum params", function()
+		assert.are.equal(
+			tools.extract_hex[[
+				10						-- packet type == 1 (CONNECT), flags == 0
+				15						-- length == 0x15 == 21 bytes
+
+											-- next is 21 bytes for variable header and payload:
+
+					0004 4D515454			-- protocol name == "MQTT"
+					04						-- protocol level (4 == v3.1.1)
+					00						-- connect flags: clean=false, will_flag=false, will_qos=0, will_retain=false, password=false, username=false
+					0000					-- keep alive == 0
+
+												-- next is payload:
+
+						0009 636C69656E742D6964	-- client id == "client-id"
+			]],
+			tools.hex(tostring(protocol4.make_packet{
+				type = protocol.packet_type.CONNECT,
+				id = "client-id",
+			}))
+		)
+	end)
+
+	it("CONNECT with full params", function()
 		assert.are.equal(
 			tools.extract_hex[[
 				10 						-- packet type == 1 (CONNECT), flags == 0
@@ -51,9 +75,7 @@ describe("MQTT v3.1.1 protocol: making packets", function()
 		)
 	end)
 
-	-- TODO: it("CONNECT with some properties", function() end)
-
-	it("PUBLISH with full properties", function()
+	it("PUBLISH with full params", function()
 		assert.are.equal(
 			tools.extract_hex[[
 				3B 						-- packet type == 3 (PUBLISH), flags == 0xB == 1011 == DUP=1, QoS=1, RETAIN=1

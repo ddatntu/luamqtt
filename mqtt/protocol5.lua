@@ -30,6 +30,7 @@ local tbl_sort = table.sort
 local str_sub = string.sub
 local str_byte = string.byte
 local str_char = string.char
+local fmt = string.format
 local bor = bit.bor
 local band = bit.band
 local lshift = bit.lshift
@@ -82,7 +83,12 @@ local function make_connect_flags(args)
 		assert(type(args.will.qos) == "number", "expecting .will.qos to be a number")
 		assert(check_qos(args.will.qos), "expecting .will.qos to be a valid QoS value")
 		assert(type(args.will.retain) == "boolean", "expecting .will.retain to be a boolean")
-		assert(type(args.will.properties) == "table", "expecting .will.properties to be a table")
+		if args.will.properties ~= nil then
+			assert(type(args.will.properties) == "table", "expecting .will.properties to be a table")
+		end
+		if args.will.user_properties ~= nil then
+			assert(type(args.will.user_properties) == "table", "expecting .will.user_properties to be a table")
+		end
 		-- will flag should be set to 1
 		byte = bor(byte, lshift(1, 2))
 		-- DOC: 3.1.2.6 Will QoS
@@ -211,7 +217,6 @@ end
 
 -- Allowed properties per packet type
 local allowed_properties = {
-	-- DOC: 3.1.2.11 CONNECT Properties
 	[packet_type.CONNECT] = {
 		[0x11] = true, -- DOC: 3.1.2.11.2 Session Expiry Interval
 		[0x21] = true, -- DOC: 3.1.2.11.3 Receive Maximum
@@ -251,6 +256,15 @@ local allowed_properties = {
 		[0x26] = true, -- DOC: 3.3.2.3.7 User Property
 		[0x0B] = true, -- DOC: 3.3.2.3.8 Subscription Identifier
 		[0x03] = true, -- DOC: 3.3.2.3.9 Content Type
+	},
+	will = {
+		[0x18] = true, -- DOC: 3.1.3.2.2 Will Delay Interval
+		[0x01] = true, -- DOC: 3.1.3.2.3 Payload Format Indicator
+		[0x02] = true, -- DOC: 3.1.3.2.4 Message Expiry Interval
+		[0x03] = true, -- DOC: 3.1.3.2.5 Content Type
+		[0x08] = true, -- DOC: 3.1.3.2.6 Response Topic
+		[0x09] = true, -- DOC: 3.1.3.2.7 Correlation Data
+		[0x26] = true, -- DOC: 3.1.3.2.8 User Property
 	},
 	[packet_type.PUBACK] = {
 		[0x1F] = true, -- DOC: 3.4.2.2.2 Reason String
@@ -341,14 +355,27 @@ local function make_properties(ptype, args)
 	if args.user_properties ~= nil then
 		assert(type(args.user_properties) == "table", "expecting .user_properties to be a table")
 		assert(allowed[uprop_id], "user_property is not allowed for packet type "..ptype)
-		for name, value in pairs(args.user_properties) do
-			if type(name) == "number" and type(value) == "table" then
-				-- this is a {"name", "value"} array item, not name = "value" pair
-				name = value[1]
-				value = value[2]
+		local order = {}
+		for name, val in pairs(args.user_properties) do
+			local ntype = type(name)
+			if ntype == "string" then
+				if type(val) ~= "string" then
+					error(fmt("user property '%s' value should be a string", name))
+				end
+				order[#order + 1] = {name, val, 0}
+			elseif ntype == "number" then
+				if type(val) ~= "table" or type(val[1]) ~= "string" or type(val[2]) ~= "string" then
+					error(fmt("user property at index %d should be a table with two strings", name))
+				end
+				order[#order + 1] = {val[1], val[2], name}
+			else
+				error(fmt("unknown user property name type passed: %s", ntype))
 			end
-			assert(type(name) == "string", "expecting user property name to be a string: "..tostring(name))
-			assert(type(value) == "string", "expecting user property value to be a string: "..tostring(value))
+		end
+		tbl_sort(order, function(a, b) if a[1] == b[1] then return a[3] < b[3] else return a[1] < b[1] end end)
+		for _, pair in ipairs(order) do
+			local name = pair[1]
+			local value = pair[2]
 			-- make user property data
 			local prop = combine(
 				str_char(make_var_length(uprop_id)),
@@ -397,7 +424,7 @@ local function make_packet_connect(args)
 	)
 	if args.will then
 		-- DOC: 3.1.3.2 Will Properties
-		payload:append(make_properties(packet_type.PUBLISH, args.will))
+		payload:append(make_properties("will", args.will))
 		-- DOC: 3.1.3.3 Will Topic
 		payload:append(make_string(args.will.topic))
 		-- DOC: 3.1.3.4 Will Payload
@@ -561,10 +588,10 @@ local function make_packet_subscribe(args)
 			assert(type(subscription.qos) == "number", "expecting .subscriptions["..i.."].qos to be a number")
 			assert(check_qos(subscription.qos), "expecting .subscriptions["..i.."].qos to be a valid QoS value")
 		end
-		assert(type(subscription.no_local) == "boolean", "expecting .subscriptions["..i.."].no_local to be a boolean")
-		assert(type(subscription.retain_as_published) == "boolean", "expecting .subscriptions["..i.."].retain_as_published to be a boolean")
-		assert(type(subscription.retain_handling) == "number", "expecting .subscriptions["..i.."].retain_handling to be a number")
-		assert(check_retain_handling(subscription.retain_handling), "expecting .subscriptions["..i.."].retain_handling to be a valid Retain Handling option")
+		if subscription.retain_handling ~= nil then
+			assert(type(subscription.retain_handling) == "number", "expecting .subscriptions["..i.."].retain_handling to be a number")
+			assert(check_retain_handling(subscription.retain_handling), "expecting .subscriptions["..i.."].retain_handling to be a valid Retain Handling option")
+		end
 		-- DOC: 3.8.3.1 Subscription Options
 		local so = subscription.qos or 0
 		if subscription.no_local then
@@ -573,7 +600,9 @@ local function make_packet_subscribe(args)
 		if subscription.retain_as_published then
 			so = bor(so, 8) -- set Bit 3
 		end
-		so = bor(so, lshift(subscription.retain_handling, 4)) -- set Bit 4 and 5
+		if subscription.retain_handling then
+			so = bor(so, lshift(subscription.retain_handling, 4)) -- set Bit 4 and 5
+		end
 		payload:append(make_string(subscription.topic))
 		payload:append(make_uint8(so))
 	end
@@ -618,7 +647,7 @@ local function make_packet_disconnect(args)
 		variable_header:append(props)							-- DOC: 3.14.2.2 DISCONNECT Properties
 	end
 	-- DOC: 3.14.1 DISCONNECT Fixed Header
-	local header = make_header(packet_type.DISCONNECT, 2, variable_header:len()) -- flags: fixed 0010 bits, DOC: Figure 3.28 – UNSUBSCRIBE packet Fixed Header
+	local header = make_header(packet_type.DISCONNECT, 0, variable_header:len()) -- flags: 0
 	return combine(header, variable_header)
 end
 
