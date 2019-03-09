@@ -190,7 +190,7 @@ local property_pairs = {
 	{ 0x28, "wildcard_subscription_available",
 		make = make_uint8_0_or_1,
 		parse = parse_uint8_0_or_1, },
-	{ 0x29, "subscription_identifier_available",
+	{ 0x29, "subscription_identifiers_available",
 		make = make_uint8_0_or_1,
 		parse = parse_uint8_0_or_1, },
 	{ 0x2A, "shared_subscription_available",
@@ -722,6 +722,7 @@ local function parse_properties(ptype, read_data, input, packet)
 	if not packet.user_properties then
 		packet.user_properties = {}
 	end
+	local uprops = packet.user_properties
 	-- parse allowed properties
 	local uprop_id = properties.user_property
 	local allowed = assert(allowed_properties[ptype], "no allowed properties for specified packet type: "..tostring(ptype))
@@ -746,7 +747,22 @@ local function parse_properties(ptype, read_data, input, packet)
 			if not value then
 				return false, "failed to parse user property value: "..err
 			end
-			packet.user_properties[name] = value
+			local old_val = uprops[name]
+			if old_val ~= nil then
+				-- ensure uprops contains pairs with name = <old value>
+				local found = false
+				for _, pair in ipairs(uprops) do
+					if pair[1] == name and pair[2] == old_val then
+						found = true
+						break
+					end
+				end
+				if not found then
+					uprops[#uprops + 1] = {name, old_val}
+				end
+				uprops[#uprops + 1] = {name, value}
+			end
+			uprops[name] = value
 		else
 			-- parse property value according its identifier
 			local value
