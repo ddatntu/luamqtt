@@ -302,7 +302,7 @@ describe("MQTT v5.0 protocol: making packets", function()
 					topic_alias = 0x1234,
 					response_topic = "here",
 					correlation_data = "some",
-					subscription_identifiers = 5, -- NOTE: that property may be included several times but only from the broker side
+					subscription_identifiers = {5}, -- NOTE: that property may be included several times but only from the broker side
 					content_type = "you/tellme",
 				},
 				user_properties = {
@@ -709,7 +709,7 @@ describe("MQTT v5.0 protocol: making packets", function()
 					},
 				},
 				properties = {
-					subscription_identifier = 0x2345,
+					subscription_identifiers = {0x2345},
 				},
 				user_properties = {
 					hello = "again",

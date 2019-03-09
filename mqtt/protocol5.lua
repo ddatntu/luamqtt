@@ -334,6 +334,11 @@ local function make_properties(ptype, args)
 		tbl_sort(order, function(a, b) return a[1] < b[1] end)
 		for _, item in ipairs(order) do
 			local prop_id, name,  value = unpack(item)
+			if property_multiple[prop_id] then
+				assert(type(value) == "table", "expecting list-table for property with multiple value")
+				assert(#value == 1, "only one value for multiple-property supported")
+				value = value[1]
+			end
 			-- make property data
 			local ok, val = pcall(property_make[prop_id], value)
 			if not ok then
